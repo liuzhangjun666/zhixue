@@ -1,0 +1,45 @@
+:root {
+  /* 品牌色 */
+  --color-primary: #7C3AED;
+  --color-primary-dark: #6D28D9;
+  --color-primary-light: #8B5CF6;
+  
+  /* 角色辅助色 */
+  --color-parent: #E9407A;
+  --color-parent-dark: #BE185D;
+  --color-teacher: #10A881;
+  --color-teacher-dark: #059669;
+  
+  /* 文本色 */
+  --color-text-main: #1F2937;
+  --color-text-sub: #6B7280;
+  --color-text-light: #9CA3AF;
+  
+  /* 边框与辅助色 */
+  --color-border: #E5E7EB;
+  --color-bg-page: #F9F5FF;
+  --color-warning: #F59E0B;
+  --color-danger: #EF4444;
+  
+  /* 渐变色 */
+  --gradient-page: linear-gradient(135deg, #F9F5FF 0%, #F3E8FF 50%, #EDE9FE 100%);
+  --gradient-parent: linear-gradient(135deg, #E9407A 0%, #BE185D 100%);
+  --gradient-teacher: linear-gradient(135deg, #10A881 0%, #059669 100%);
+  --gradient-primary: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%);
+  
+  /* 玻璃态背景 */
+  --glass-bg: rgba(255, 255, 255, 0.95);
+  --glass-border: rgba(255, 255, 255, 0.5);
+  
+  /* 阴影 */
+  --shadow-card: 0 4px 24px rgba(124, 58, 237, 0.1);
+  --shadow-btn: 0 4px 12px rgba(124, 58, 237, 0.3);
+  --shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.15);
+  
+  /* 布局与圆角 */
+  --max-width: 1200px;
+  --radius-card: 16px;
+  --radius-btn: 10px;
+  --radius-input: 10px;
+  --spacing-base: 24px;
+}

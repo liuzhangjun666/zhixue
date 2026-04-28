@@ -1,0 +1,154 @@
+{
+  "parentProfile": {
+    "parentName": "李明爸爸",
+    "phone": "13800138000",
+    "city": "上海",
+    "bio": "关注孩子学习习惯培养，偏好长期稳定的老师合作。",
+    "preferredGrade": "小学",
+    "preferredSubjects": [
+      "数学",
+      "英语"
+    ],
+    "children": [
+      {
+        "id": 1,
+        "name": "李小明",
+        "grade": "四年级",
+        "targetSubject": "数学"
+      },
+      {
+        "id": 2,
+        "name": "李小雨",
+        "grade": "一年级",
+        "targetSubject": "英语"
+      }
+    ]
+  },
+  "requests": [
+    {
+      "id": 20260301,
+      "title": "四年级数学专项提升",
+      "subject": "数学",
+      "grade": "四年级",
+      "budget": "200-280 元/小时",
+      "schedule": "每周二、周四 19:00-20:30",
+      "createdAt": "2026-03-01",
+      "status": "cancelled",
+      "teacherName": ""
+    },
+    {
+      "id": 20260218,
+      "title": "一年级英语启蒙",
+      "subject": "英语",
+      "grade": "一年级",
+      "budget": "150-220 元/小时",
+      "schedule": "每周六 10:00-11:30",
+      "createdAt": "2026-02-18",
+      "status": "completed",
+      "teacherName": "陈老师"
+    },
+    {
+      "id": 20260126,
+      "title": "三年级语文阅读理解",
+      "subject": "语文",
+      "grade": "三年级",
+      "budget": "180-240 元/小时",
+      "schedule": "每周一 18:30-20:00",
+      "createdAt": "2026-01-26",
+      "status": "completed",
+      "teacherName": "周老师"
+    }
+  ],
+  "reviews": [
+    {
+      "id": 1,
+      "teacherName": "陈老师",
+      "subject": "英语",
+      "rating": 5,
+      "content": "课堂节奏很好，孩子愿意主动开口练习，课后反馈也很详细。",
+      "date": "2026-03-10",
+      "reply": ""
+    },
+    {
+      "id": 2,
+      "teacherName": "周老师",
+      "subject": "语文",
+      "rating": 4,
+      "content": "阅读方法讲解清晰，建议作业批注再细一点。",
+      "date": "2026-02-28",
+      "reply": "已和老师沟通作业反馈粒度，会在下一阶段优化。"
+    },
+    {
+      "id": 3,
+      "teacherName": "王老师",
+      "subject": "数学",
+      "rating": 5,
+      "content": "针对错题做了专题训练，最近单元测试提升明显。",
+      "date": "2026-02-15",
+      "reply": ""
+    }
+  ],
+  "membership": {
+    "status": {
+      "planName": "粉钻会员",
+      "expireAt": "2026-05-15",
+      "remainingUnlock": 5,
+      "weeklyPriorityQuota": 3
+    },
+    "plans": [
+      {
+        "id": "month",
+        "name": "月度会员",
+        "price": 99,
+        "durationMonth": 1,
+        "features": [
+          "每日 5 次老师联系方式解锁",
+          "优先匹配队列",
+          "课堂记录导出"
+        ],
+        "recommended": false
+      },
+      {
+        "id": "quarter",
+        "name": "季度会员",
+        "price": 269,
+        "durationMonth": 3,
+        "features": [
+          "每日 8 次老师联系方式解锁",
+          "优先匹配队列",
+          "学习规划模板",
+          "专属客服答疑"
+        ],
+        "recommended": true
+      },
+      {
+        "id": "year",
+        "name": "年度会员",
+        "price": 899,
+        "durationMonth": 12,
+        "features": [
+          "每日 12 次老师联系方式解锁",
+          "最高优先级匹配",
+          "家庭学习报告",
+          "1v1 教育顾问月度复盘"
+        ],
+        "recommended": false
+      }
+    ]
+  },
+  "settings": {
+    "password": "123456",
+    "notifications": {
+      "systemNotice": true,
+      "requestUpdate": true,
+      "classReminder": true,
+      "smsAlert": false
+    },
+    "privacy": {
+      "showPhoneToMatchedTeacher": true,
+      "allowTeacherInvite": true,
+      "shareLearningReport": false
+    },
+    "deactivated": false
+  }
+}
