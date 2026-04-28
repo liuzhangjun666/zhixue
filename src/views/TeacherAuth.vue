@@ -6,14 +6,12 @@ import GlassCard from '../components/GlassCard.vue'
 const router = useRouter()
 const currentStep = ref(1)
 
-// Form data
 const phone = ref('')
 const code = ref('')
 const password = ref('')
 
 const nickname = ref('')
 const gender = ref('')
-const exp = ref('')
 
 const nextStep = () => {
   if (currentStep.value < 4) {
@@ -28,29 +26,26 @@ const finishRegister = () => {
 
 <template>
   <div class="auth-layout teacher-theme">
-    <!-- 左侧品牌展示区 -->
     <div class="brand-section">
       <div class="brand-logo">
         <div class="brand-logo-icon">🎓</div>
         <span class="brand-logo-text">知学空间 · 老师端</span>
       </div>
-      <h1 class="brand-title">加入知学空间<br>传递知识的价值</h1>
-      <p class="brand-subtitle">成为优秀的学习陪伴者，收获尊重与回报</p>
-      
+      <h1 class="brand-title">加入知学空间<br>让专业教学被更多家长看见</h1>
+      <p class="brand-subtitle">成为可信赖的同城学习陪伴者，持续获得优质生源。</p>
+
       <div class="value-tags mt-4">
         <div class="value-tag">✓ 专业认证</div>
         <div class="value-tag">✓ 优质学员</div>
         <div class="value-tag">✓ 灵活定价</div>
       </div>
-      
+
       <div class="glow-effect glow-1"></div>
       <div class="glow-effect glow-2"></div>
     </div>
-    
-    <!-- 右侧注册表单 -->
+
     <div class="form-section">
       <GlassCard maxWidth="420px">
-        <!-- 步骤指示器 -->
         <div class="step-indicator mb-4">
           <div class="step" :class="{ active: currentStep >= 1, completed: currentStep > 1 }">
             <div class="step-dot"></div>
@@ -67,8 +62,7 @@ const finishRegister = () => {
             <span class="step-label">身份认证</span>
           </div>
         </div>
-        
-        <!-- 步骤 1：验证手机 -->
+
         <div v-if="currentStep === 1" class="step-content">
           <form @submit.prevent="nextStep">
             <div class="input-group">
@@ -76,25 +70,24 @@ const finishRegister = () => {
                 <input type="tel" v-model="phone" class="input-field" placeholder="手机号" required>
               </div>
             </div>
-            
+
             <div class="input-group">
               <div class="input-wrapper">
                 <input type="text" v-model="code" class="input-field" placeholder="验证码" required>
                 <button type="button" class="btn btn-ghost btn-teacher-ghost btn-sm" style="margin-right: 4px;">获取验证码</button>
               </div>
             </div>
-            
+
             <div class="input-group">
               <div class="input-wrapper">
                 <input type="password" v-model="password" class="input-field" placeholder="设置密码" required>
               </div>
             </div>
-            
+
             <button type="submit" class="btn btn-teacher w-100 mt-4">下一步</button>
           </form>
         </div>
-        
-        <!-- 步骤 2：完善资料 -->
+
         <div v-if="currentStep === 2" class="step-content">
           <form @submit.prevent="nextStep">
             <div class="avatar-upload mb-4">
@@ -104,13 +97,13 @@ const finishRegister = () => {
               </div>
               <p class="upload-hint">支持 JPG、PNG，建议 200×200</p>
             </div>
-          
+
             <div class="input-group">
               <div class="input-wrapper">
                 <input type="text" v-model="nickname" class="input-field" placeholder="真实姓名" required>
               </div>
             </div>
-            
+
             <div class="input-group">
               <select v-model="gender" class="select-field" required>
                 <option value="" disabled>性别</option>
@@ -118,35 +111,33 @@ const finishRegister = () => {
                 <option value="female">女</option>
               </select>
             </div>
-            
+
             <button type="submit" class="btn btn-teacher w-100 mt-4">下一步</button>
           </form>
         </div>
-        
-        <!-- 步骤 3：资质认证 -->
+
         <div v-if="currentStep === 3" class="step-content">
           <div class="cert-upload mb-4">
             <div class="cert-icon">📄</div>
             <p class="cert-title">上传教师资格证或从业证明</p>
-            <p class="cert-desc">（选填，提升诚信评分）</p>
+            <p class="cert-desc">选填，提交后可提升信任度和曝光权重</p>
             <button class="btn btn-ghost btn-teacher-ghost mt-3">选择文件</button>
             <p class="upload-hint mt-2">支持 JPG、PNG、PDF，不超过 5MB</p>
           </div>
-          
+
           <button @click="nextStep" class="btn btn-teacher w-100">提交认证</button>
-          <button @click="nextStep" class="btn btn-ghost btn-teacher-ghost w-100 mt-2 border-0">跳过，以后再传</button>
+          <button @click="nextStep" class="btn btn-ghost btn-teacher-ghost w-100 mt-2 border-0">跳过，稍后再传</button>
         </div>
-        
-        <!-- 步骤 4：完成 -->
+
         <div v-if="currentStep === 4" class="step-content text-center">
-          <div class="success-icon mb-3">✅</div>
-          <h2 class="mb-2">入驻成功！</h2>
-          <p class="text-sub mb-4">您的资料已提交，去完善更多信息提升曝光率吧。</p>
+          <div class="success-icon mb-3">✓</div>
+          <h2 class="mb-2">入驻成功</h2>
+          <p class="text-sub mb-4">基础资料已提交，去个人中心完善更多信息，提升接单效率。</p>
           <button @click="finishRegister" class="btn btn-teacher w-100">前往个人中心</button>
         </div>
-        
+
         <div v-if="currentStep === 1" class="text-center mt-4 text-sub">
-          已有老师账号？ <router-link to="/login" class="text-teacher">立即登录</router-link>
+          已有老师账号？<router-link to="/login" class="text-teacher">立即登录</router-link>
         </div>
       </GlassCard>
     </div>
@@ -154,7 +145,6 @@ const finishRegister = () => {
 </template>
 
 <style scoped>
-/* 覆盖主色调为老师绿 */
 .teacher-theme {
   --color-primary: var(--color-teacher);
   --gradient-primary: var(--gradient-teacher);
@@ -191,7 +181,6 @@ const finishRegister = () => {
 .glow-1 { top: -50px; right: 0; width: 300px; height: 300px; background: rgba(16, 168, 129, 0.15); }
 .glow-2 { bottom: -100px; left: 50px; width: 250px; height: 250px; background: rgba(5, 150, 105, 0.1); }
 
-/* 步骤指示器 */
 .step-indicator {
   display: flex;
   align-items: center;
@@ -255,7 +244,6 @@ const finishRegister = () => {
   background: var(--color-teacher);
 }
 
-/* 注册特有样式 */
 .w-100 { width: 100%; }
 .text-center { text-align: center; }
 
@@ -277,7 +265,6 @@ const finishRegister = () => {
   box-shadow: 0 0 0 3px rgba(16, 168, 129, 0.1);
 }
 
-/* 上传区样式 */
 .avatar-upload {
   display: flex;
   flex-direction: column;

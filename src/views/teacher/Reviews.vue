@@ -19,7 +19,7 @@ const filtered = computed(() => {
   return reviews.value.filter((item) => item.parentName.includes(kw) || item.subject.includes(kw) || item.content.includes(kw))
 })
 
-const stars = (rating: number) => '¡ï'.repeat(Math.max(0, rating)) + '¡î'.repeat(Math.max(0, 5 - rating))
+const stars = (rating: number) => 'â˜…'.repeat(Math.max(0, rating)) + 'â˜†'.repeat(Math.max(0, 5 - rating))
 
 const loadReviews = async () => {
   loading.value = true
@@ -27,7 +27,7 @@ const loadReviews = async () => {
   try {
     reviews.value = await teacherApi.getReviews()
   } catch (error) {
-    feedback.value = (error as Error).message || 'ÆÀ¼Û¼ÓÔØÊ§°Ü'
+    feedback.value = (error as Error).message || 'è¯„ä»·åŠ è½½å¤±è´¥'
   } finally {
     loading.value = false
   }
@@ -40,24 +40,24 @@ onMounted(loadReviews)
   <section class="page">
     <header class="card header">
       <div>
-        <h1>ÎÒµÄÆÀ¼Û</h1>
-        <p>Î¬»¤ºÃÆÀ¼ÛÓĞÖúÓÚÌáÉıÀÏÊ¦Æ¥ÅäÅÅĞò¡£</p>
+        <h1>æˆ‘çš„è¯„ä»·</h1>
+        <p>ç»´æŠ¤å¥½è¯„ä»·æœ‰åŠ©äºæå‡è€å¸ˆåŒ¹é…æ’åºã€‚</p>
       </div>
-      <div class="score">×ÛºÏÆÀ·Ö {{ average }}</div>
+      <div class="score">ç»¼åˆè¯„åˆ† {{ average }}</div>
     </header>
 
     <article class="card search">
-      <input v-model="keyword" type="text" placeholder="°´¼Ò³¤¡¢¿ÆÄ¿¡¢ÄÚÈİËÑË÷" />
+      <input v-model="keyword" type="text" placeholder="æŒ‰å®¶é•¿ã€ç§‘ç›®ã€å†…å®¹æœç´¢" />
     </article>
 
     <article class="card" v-if="loading">
-      <p>ÆÀ¼Û¼ÓÔØÖĞ...</p>
+      <p>è¯„ä»·åŠ è½½ä¸­...</p>
     </article>
 
     <div class="list" v-else-if="filtered.length > 0">
       <article class="card item" v-for="item in filtered" :key="item.id">
         <div class="top">
-          <h2>{{ item.parentName }} ¡¤ {{ item.subject }}</h2>
+          <h2>{{ item.parentName }} Â· {{ item.subject }}</h2>
           <span class="stars">{{ stars(item.rating) }}</span>
         </div>
         <p class="date">{{ item.date }}</p>
@@ -66,7 +66,7 @@ onMounted(loadReviews)
     </div>
 
     <article class="card" v-else>
-      <p>ÔİÎŞÆÀ¼Û¼ÇÂ¼¡£</p>
+      <p>æš‚æ— è¯„ä»·è®°å½•ã€‚</p>
     </article>
 
     <p class="feedback" v-if="feedback">{{ feedback }}</p>
@@ -90,3 +90,4 @@ onMounted(loadReviews)
 .content { margin: 10px 0 0; color: #4b5563; line-height: 1.6; }
 .feedback { margin: 0; border: 1px solid #fecaca; background: #fef2f2; color: #b91c1c; border-radius: 12px; padding: 12px; }
 </style>
+

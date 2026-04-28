@@ -38,7 +38,7 @@ const load = async () => {
     Object.assign(notifications, data.notifications)
     Object.assign(privacy, data.privacy)
   } catch (error) {
-    feedback.value = (error as Error).message || 'ÉèÖÃ¼ÓÔØÊ§°Ü'
+    feedback.value = (error as Error).message || 'è®¾ç½®åŠ è½½å¤±è´¥'
   } finally {
     loading.value = false
   }
@@ -46,7 +46,7 @@ const load = async () => {
 
 const updatePassword = async () => {
   if (!canUpdatePassword.value) {
-    feedback.value = 'Çë¼ì²éÃÜÂëÊäÈëÏî'
+    feedback.value = 'è¯·æ£€æŸ¥å¯†ç è¾“å…¥é¡¹'
     return
   }
   try {
@@ -54,9 +54,9 @@ const updatePassword = async () => {
     passwordForm.currentPassword = ''
     passwordForm.nextPassword = ''
     passwordForm.confirmPassword = ''
-    feedback.value = 'ÃÜÂëÒÑ¸üĞÂ'
+    feedback.value = 'å¯†ç å·²æ›´æ–°'
   } catch (error) {
-    feedback.value = (error as Error).message || 'ÃÜÂë¸üĞÂÊ§°Ü'
+    feedback.value = (error as Error).message || 'å¯†ç æ›´æ–°å¤±è´¥'
   }
 }
 
@@ -66,9 +66,9 @@ const savePrefs = async () => {
       teacherApi.updateNotifications({ ...notifications }),
       teacherApi.updatePrivacy({ ...privacy })
     ])
-    feedback.value = 'Í¨ÖªºÍÒşË½ÉèÖÃÒÑ±£´æ'
+    feedback.value = 'é€šçŸ¥å’Œéšç§è®¾ç½®å·²ä¿å­˜'
   } catch (error) {
-    feedback.value = (error as Error).message || '±£´æÉèÖÃÊ§°Ü'
+    feedback.value = (error as Error).message || 'ä¿å­˜è®¾ç½®å¤±è´¥'
   }
 }
 
@@ -78,49 +78,49 @@ onMounted(load)
 <template>
   <section class="page">
     <header class="card">
-      <h1>ÕË»§ÉèÖÃ</h1>
-      <p>¹ÜÀíÕËºÅ°²È«¡¢ÏûÏ¢Í¨ÖªºÍÒşË½Æ«ºÃ¡£</p>
+      <h1>è´¦æˆ·è®¾ç½®</h1>
+      <p>ç®¡ç†è´¦å·å®‰å…¨ã€æ¶ˆæ¯é€šçŸ¥å’Œéšç§åå¥½ã€‚</p>
     </header>
 
     <article class="card" v-if="loading">
-      <p>ÉèÖÃ¼ÓÔØÖĞ...</p>
+      <p>è®¾ç½®åŠ è½½ä¸­...</p>
     </article>
 
     <article class="card" v-else>
-      <h2>°²È«ÉèÖÃ</h2>
+      <h2>å®‰å…¨è®¾ç½®</h2>
       <div class="grid">
         <label>
-          µ±Ç°ÃÜÂë
+          å½“å‰å¯†ç 
           <input v-model="passwordForm.currentPassword" type="password" />
         </label>
         <label>
-          ĞÂÃÜÂë
+          æ–°å¯†ç 
           <input v-model="passwordForm.nextPassword" type="password" />
         </label>
         <label>
-          È·ÈÏĞÂÃÜÂë
+          ç¡®è®¤æ–°å¯†ç 
           <input v-model="passwordForm.confirmPassword" type="password" />
         </label>
       </div>
-      <button class="btn-primary" @click="updatePassword">¸üĞÂÃÜÂë</button>
+      <button class="btn-primary" @click="updatePassword">æ›´æ–°å¯†ç </button>
     </article>
 
     <article class="card" v-if="!loading">
-      <h2>Í¨ÖªÉèÖÃ</h2>
+      <h2>é€šçŸ¥è®¾ç½®</h2>
       <div class="switch-list">
-        <label><input type="checkbox" v-model="notifications.newRequest" /> ĞÂÇëÇóÌáĞÑ</label>
-        <label><input type="checkbox" v-model="notifications.messageReminder" /> ÏûÏ¢ÌáĞÑ</label>
-        <label><input type="checkbox" v-model="notifications.systemNotice" /> ÏµÍ³Í¨Öª</label>
+        <label><input type="checkbox" v-model="notifications.newRequest" /> æ–°è¯·æ±‚æé†’</label>
+        <label><input type="checkbox" v-model="notifications.messageReminder" /> æ¶ˆæ¯æé†’</label>
+        <label><input type="checkbox" v-model="notifications.systemNotice" /> ç³»ç»Ÿé€šçŸ¥</label>
       </div>
     </article>
 
     <article class="card" v-if="!loading">
-      <h2>ÒşË½ÉèÖÃ</h2>
+      <h2>éšç§è®¾ç½®</h2>
       <div class="switch-list">
-        <label><input type="checkbox" v-model="privacy.showPhoneToParent" /> Æ¥ÅäºóÕ¹Ê¾ÊÖ»úºÅ</label>
-        <label><input type="checkbox" v-model="privacy.allowParentInvite" /> ÔÊĞí¼Ò³¤Ö÷¶¯ÑûÔ¼</label>
+        <label><input type="checkbox" v-model="privacy.showPhoneToParent" /> åŒ¹é…åå±•ç¤ºæ‰‹æœºå·</label>
+        <label><input type="checkbox" v-model="privacy.allowParentInvite" /> å…è®¸å®¶é•¿ä¸»åŠ¨é‚€çº¦</label>
       </div>
-      <button class="btn-primary" @click="savePrefs">±£´æÆ«ºÃ</button>
+      <button class="btn-primary" @click="savePrefs">ä¿å­˜åå¥½</button>
     </article>
 
     <p class="feedback" v-if="feedback">{{ feedback }}</p>
@@ -142,3 +142,4 @@ input[type='password']:focus { outline: none; border-color: #10a881; box-shadow:
 .feedback { margin: 0; border: 1px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; border-radius: 12px; padding: 12px; }
 @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
 </style>
+

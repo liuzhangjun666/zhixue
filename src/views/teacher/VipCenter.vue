@@ -7,7 +7,7 @@ const processing = ref(false)
 const feedback = ref('')
 const resultText = ref('')
 
-const planName = ref('ÆÕÍ¨ÀÏÊ¦')
+const planName = ref('æ™®é€šè€å¸ˆ')
 const expireAt = ref<string | null>(null)
 const plans = ref<TeacherMembershipPlanDTO[]>([])
 const selectedPlanId = ref('')
@@ -25,7 +25,7 @@ const load = async () => {
     plans.value = list
     selectedPlanId.value = list[0]?.id || ''
   } catch (error) {
-    feedback.value = (error as Error).message || '»áÔ±ĞÅÏ¢¼ÓÔØÊ§°Ü'
+    feedback.value = (error as Error).message || 'ä¼šå‘˜ä¿¡æ¯åŠ è½½å¤±è´¥'
   } finally {
     loading.value = false
   }
@@ -39,10 +39,10 @@ const subscribe = async () => {
   try {
     await teacherApi.subscribeMembership(selectedPlan.value.id, autoRenew.value)
     planName.value = selectedPlan.value.name
-    resultText.value = `ÒÑ¿ªÍ¨ ${selectedPlan.value.name}`
+    resultText.value = `å·²å¼€é€š ${selectedPlan.value.name}`
     await load()
   } catch (error) {
-    feedback.value = (error as Error).message || '¿ªÍ¨Ê§°Ü'
+    feedback.value = (error as Error).message || 'å¼€é€šå¤±è´¥'
   } finally {
     processing.value = false
   }
@@ -54,23 +54,23 @@ onMounted(load)
 <template>
   <section class="page">
     <header class="card">
-      <h1>»áÔ±ÖĞĞÄ</h1>
-      <p>Í¨¹ıÆØ¹âÉı¼¶»ñµÃ¸ü¶à¼Ò³¤×ÉÑ¯»ú»á¡£</p>
-      <span class="tag">µ±Ç°£º{{ planName }}</span>
-      <span class="sub">µ½ÆÚ£º{{ expireAt || 'Î´¿ªÍ¨' }}</span>
+      <h1>ä¼šå‘˜ä¸­å¿ƒ</h1>
+      <p>é€šè¿‡æ›å…‰å‡çº§è·å¾—æ›´å¤šå®¶é•¿å’¨è¯¢æœºä¼šã€‚</p>
+      <span class="tag">å½“å‰ï¼š{{ planName }}</span>
+      <span class="sub">åˆ°æœŸï¼š{{ expireAt || 'æœªå¼€é€š' }}</span>
     </header>
 
     <article class="card" v-if="loading">
-      <p>»áÔ±Êı¾İ¼ÓÔØÖĞ...</p>
+      <p>ä¼šå‘˜æ•°æ®åŠ è½½ä¸­...</p>
     </article>
 
     <div class="plans" v-else>
       <article class="card plan" v-for="plan in plans" :key="plan.id" :class="{ active: selectedPlanId === plan.id }" @click="selectedPlanId = plan.id">
         <div class="top">
           <h2>{{ plan.name }}</h2>
-          <span class="badge" v-if="plan.recommended">ÍÆ¼ö</span>
+          <span class="badge" v-if="plan.recommended">æ¨è</span>
         </div>
-        <p class="price">£¤{{ plan.price }} / {{ plan.durationMonth }}¸öÔÂ</p>
+        <p class="price">ï¿¥{{ plan.price }} / {{ plan.durationMonth }}ä¸ªæœˆ</p>
         <ul>
           <li v-for="feature in plan.features" :key="feature">{{ feature }}</li>
         </ul>
@@ -80,9 +80,9 @@ onMounted(load)
     <article class="card action" v-if="!loading && selectedPlan">
       <label>
         <input type="checkbox" v-model="autoRenew" />
-        <span>×Ô¶¯Ğø·Ñ£¨µ½ÆÚÇ°ÌáĞÑ£©</span>
+        <span>è‡ªåŠ¨ç»­è´¹ï¼ˆåˆ°æœŸå‰æé†’ï¼‰</span>
       </label>
-      <button class="btn-primary" :disabled="processing" @click="subscribe">{{ processing ? '´¦ÀíÖĞ...' : `¿ªÍ¨ ${selectedPlan.name}` }}</button>
+      <button class="btn-primary" :disabled="processing" @click="subscribe">{{ processing ? 'å¤„ç†ä¸­...' : `å¼€é€š ${selectedPlan.name}` }}</button>
     </article>
 
     <p class="result" v-if="resultText">{{ resultText }}</p>
@@ -115,3 +115,4 @@ ul { margin: 0; padding-left: 16px; color: #4b5563; display: flex; flex-directio
   .action { flex-direction: column; align-items: flex-start; }
 }
 </style>
+

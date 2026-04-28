@@ -1,14 +1,14 @@
 <template>
   <div class="messages-container">
-    <!-- 侧边栏：会话列表 -->
+    <!-- 左侧栏：会话列表 -->
     <div class="conversations-sidebar">
       <div class="sidebar-header">
         <h2>消息中心</h2>
       </div>
       <div class="conversations-list">
-        <div 
-          v-for="conv in conversations" 
-          :key="conv.id" 
+        <div
+          v-for="conv in conversations"
+          :key="conv.id"
           class="conversation-item"
           :class="{ active: currentConversation?.id === conv.id }"
           @click="selectConversation(conv)"
@@ -18,31 +18,32 @@
           </div>
           <div class="conv-info">
             <div class="conv-header">
-              <span class="name">{{ conv.contactName }} <span class="role-badge">{{ conv.contactRole === 'teacher' ? '教师' : '家长' }}</span></span>
+              <span class="name">
+                {{ conv.contactName }}
+                <span class="role-badge">{{ conv.contactRole === 'teacher' ? '老师' : '家长' }}</span>
+              </span>
               <span class="time">{{ formatTime(conv.updatedAt) }}</span>
             </div>
             <div class="last-message">{{ conv.lastMessage }}</div>
           </div>
         </div>
-        <div v-if="conversations.length === 0" class="empty-state">
-          暂无消息
-        </div>
+        <div v-if="conversations.length === 0" class="empty-state">暂无消息</div>
       </div>
     </div>
 
-    <!-- 主面板：聊天�?-->
+    <!-- 主面板：聊天区 -->
     <div class="chat-main">
       <template v-if="currentConversation">
         <div class="chat-header">
-          <h3>�?{{ currentConversation.contactName }} 的对�?/h3>
+          <h3>与 {{ currentConversation.contactName }} 的对话</h3>
         </div>
-        
+
         <div class="messages-list" ref="messagesListRef">
-          <div 
-            v-for="msg in currentMessages" 
+          <div
+            v-for="msg in currentMessages"
             :key="msg.id"
             class="message-bubble"
-            :class="{ 'mine': msg.senderId === currentUserId }"
+            :class="{ mine: msg.senderId === currentUserId }"
           >
             <div class="bubble-content">{{ msg.content }}</div>
             <div class="bubble-time">{{ formatTime(msg.createdAt) }}</div>
@@ -50,21 +51,22 @@
         </div>
 
         <div class="chat-input-area">
-          <input 
-            v-model="newMessage" 
-            type="text" 
-            placeholder="输入消息..." 
+          <input
+            v-model="newMessage"
+            type="text"
+            placeholder="输入消息..."
             @keyup.enter="sendMessage"
           />
           <button class="send-btn" @click="sendMessage" :disabled="!newMessage.trim()">
             <SendIcon class="icon" />
-            发�?
+            发送
           </button>
         </div>
       </template>
+
       <div v-else class="empty-chat">
         <MessageSquareIcon class="large-icon" />
-        <p>选择一个联系人开始聊�?/p>
+        <p>选择一个联系人开始聊天</p>
       </div>
     </div>
   </div>
@@ -150,12 +152,12 @@ onMounted(() => {
   })
 
   socket.on('receive_message', (msg) => {
-    // 如果收到的消息属于当前打开的会�?
+    // 如果收到的消息属于当前打开的会话，则直接追加显示
     if (currentConversation.value && msg.conversationId === currentConversation.value.id) {
       currentMessages.value.push(msg)
       scrollToBottom()
     }
-    // 重新加载会话列表更新最新消�?
+    // 刷新会话列表，更新最后一条消息和未读数
     loadConversations()
   })
 
@@ -178,14 +180,14 @@ onUnmounted(() => {
 <style scoped>
 .messages-container {
   display: flex;
-  height: calc(100vh - 100px); /* 减去 navbar 的高度及间距 */
+  height: calc(100vh - 100px); /* 减去 navbar 的高度和外边距 */
   max-width: 1200px;
   margin: 0 auto;
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(20px);
   border-radius: 24px;
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.05);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.5);
   margin-top: 20px;
   margin-bottom: 20px;
@@ -193,15 +195,15 @@ onUnmounted(() => {
 
 .conversations-sidebar {
   width: 320px;
-  border-right: 1px solid rgba(0,0,0,0.05);
+  border-right: 1px solid rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
-  background: rgba(255,255,255,0.3);
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .sidebar-header {
   padding: 20px;
-  border-bottom: 1px solid rgba(0,0,0,0.05);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .sidebar-header h2 {
@@ -231,7 +233,7 @@ onUnmounted(() => {
 .conversation-item.active {
   background: rgba(0, 113, 227, 0.1);
   border-left: 4px solid #0071e3;
-  padding-left: 16px; /* 补偿 border 宽度 */
+  padding-left: 16px; /* 补偿左侧边框宽度 */
 }
 
 .avatar {
@@ -260,56 +262,65 @@ onUnmounted(() => {
 .name {
   font-weight: 600;
   color: #1d1d1f;
-  font-size: 1rem;
-}
-
-.role-badge {
-  font-size: 0.7rem;
-  background: #e8f0fe;
-  color: #0071e3;
-  padding: 2px 6px;
-  border-radius: 4px;
-  margin-left: 4px;
-}
-
-.time {
-  font-size: 0.8rem;
-  color: #86868b;
-}
-
-.last-message {
-  font-size: 0.9rem;
-  color: #86868b;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.role-badge {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #0071e3;
+  background: rgba(0, 113, 227, 0.1);
+  border-radius: 999px;
+  padding: 2px 6px;
+}
+
+.time {
+  font-size: 12px;
+  color: #86868b;
+  flex-shrink: 0;
+}
+
+.last-message {
+  font-size: 14px;
+  color: #6e6e73;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.empty-state {
+  padding: 24px;
+  text-align: center;
+  color: #86868b;
 }
 
 .chat-main {
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: #fff;
+  min-width: 0;
 }
 
 .chat-header {
   padding: 20px;
-  border-bottom: 1px solid rgba(0,0,0,0.05);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .chat-header h3 {
   margin: 0;
-  font-size: 1.1rem;
   color: #1d1d1f;
+  font-size: 1.1rem;
 }
 
 .messages-list {
   flex: 1;
-  padding: 20px;
   overflow-y: auto;
+  padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
 }
 
 .message-bubble {
@@ -322,106 +333,121 @@ onUnmounted(() => {
 }
 
 .bubble-content {
-  background: #f5f5f7;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: #f2f2f7;
   color: #1d1d1f;
-  padding: 12px 16px;
-  border-radius: 18px;
-  border-bottom-left-radius: 4px;
-  font-size: 0.95rem;
-  line-height: 1.4;
+  line-height: 1.5;
   word-break: break-word;
 }
 
 .message-bubble.mine .bubble-content {
   background: #0071e3;
   color: #fff;
-  border-bottom-left-radius: 18px;
-  border-bottom-right-radius: 4px;
 }
 
 .bubble-time {
-  font-size: 0.75rem;
-  color: #86868b;
   margin-top: 4px;
-  margin-left: 8px;
-}
-
-.message-bubble.mine .bubble-time {
-  text-align: right;
-  margin-right: 8px;
+  font-size: 11px;
+  color: #86868b;
 }
 
 .chat-input-area {
-  padding: 20px;
-  border-top: 1px solid rgba(0,0,0,0.05);
   display: flex;
-  gap: 12px;
-  background: #fff;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .chat-input-area input {
   flex: 1;
-  padding: 12px 16px;
-  border-radius: 12px;
   border: 1px solid #d2d2d7;
-  font-size: 1rem;
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-size: 14px;
   outline: none;
-  transition: border-color 0.2s;
 }
 
 .chat-input-area input:focus {
   border-color: #0071e3;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.12);
 }
 
 .send-btn {
+  border: none;
+  border-radius: 999px;
   background: #0071e3;
   color: #fff;
-  border: none;
-  border-radius: 12px;
-  padding: 0 20px;
-  font-size: 1rem;
-  font-weight: 500;
-  cursor: pointer;
-  display: flex;
+  padding: 0 16px;
+  min-width: 88px;
+  font-weight: 600;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  transition: background-color 0.2s;
-}
-
-.send-btn:hover:not(:disabled) {
-  background: #0077ed;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
 }
 
 .send-btn:disabled {
-  background: #a1c6ea;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .send-btn .icon {
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
 }
 
 .empty-chat {
   flex: 1;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
+  flex-direction: column;
   color: #86868b;
+  gap: 10px;
 }
 
 .large-icon {
-  width: 64px;
-  height: 64px;
-  margin-bottom: 16px;
-  opacity: 0.5;
+  width: 32px;
+  height: 32px;
 }
 
-.empty-state {
-  text-align: center;
-  padding: 40px;
-  color: #86868b;
+@media (max-width: 900px) {
+  .messages-container {
+    height: calc(100vh - 72px);
+    border-radius: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+
+  .conversations-sidebar {
+    width: 44%;
+  }
+
+  .chat-main {
+    width: 56%;
+  }
+}
+
+@media (max-width: 720px) {
+  .messages-container {
+    flex-direction: column;
+    height: auto;
+    min-height: calc(100vh - 72px);
+  }
+
+  .conversations-sidebar,
+  .chat-main {
+    width: 100%;
+  }
+
+  .conversations-sidebar {
+    max-height: 40vh;
+  }
+
+  .message-bubble {
+    max-width: 88%;
+  }
 }
 </style>
-

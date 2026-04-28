@@ -138,7 +138,7 @@ app.put('/api/parent/profile', async (req, res) => {
         payload.phone,
         payload.city || '',
         payload.bio || '',
-        payload.preferredGrade || 'Ğ¡Ñ§',
+        payload.preferredGrade || 'å°å­¦',
         JSON.stringify(payload.preferredSubjects || []),
         CURRENT_PARENT_USER_ID
       ]
@@ -272,7 +272,7 @@ app.post('/api/parent/reviews/:id/reply', async (req, res) => {
 
 app.get('/api/membership/status', async (req, res) => {
   const userId = resolveMembershipUserId(req)
-  const defaultName = userId === CURRENT_TEACHER_USER_ID ? 'ÆÕÍ¨ÀÏÊ¦' : 'ÆÕÍ¨ÓÃ»§'
+  const defaultName = userId === CURRENT_TEACHER_USER_ID ? 'æ™®é€šè€å¸ˆ' : 'æ™®é€šç”¨æˆ·'
   try {
     const [memberships] = await pool.query('SELECT * FROM memberships WHERE user_id = ?', [userId])
     if (memberships.length === 0) {
@@ -413,7 +413,7 @@ app.put('/api/parent/settings/privacy', async (req, res) => {
 })
 
 app.post('/api/parent/settings/deactivate', async (req, res) => {
-  if (req.body?.confirm_text !== '×¢ÏúÕËºÅ') return fail(res, 400, 'Confirm text mismatch')
+  if (req.body?.confirm_text !== 'æ³¨é”€è´¦å·') return fail(res, 400, 'Confirm text mismatch')
   try {
     await pool.query(
       'INSERT INTO user_settings (user_id, deactivated) VALUES (?, TRUE) ON DUPLICATE KEY UPDATE deactivated=TRUE',
@@ -650,7 +650,7 @@ app.get('/api/teacher/membership/status', async (_req, res) => {
   try {
     const [memberships] = await pool.query('SELECT * FROM memberships WHERE user_id = ?', [CURRENT_TEACHER_USER_ID])
     if (!memberships.length) {
-      return ok(res, { planName: 'ÆÕÍ¨ÀÏÊ¦', expireAt: null, remainingUnlock: 3, weeklyPriorityQuota: 1 })
+      return ok(res, { planName: 'æ™®é€šè€å¸ˆ', expireAt: null, remainingUnlock: 3, weeklyPriorityQuota: 1 })
     }
     const m = memberships[0]
     ok(res, {
@@ -669,26 +669,26 @@ app.get('/api/teacher/membership/plans', async (_req, res) => {
   ok(res, [
     {
       id: 'bronze',
-      name: 'Í­ÅÆÀÏÊ¦',
+      name: 'é“œç‰Œè€å¸ˆ',
       price: 19.9,
       durationMonth: 1,
-      features: ['Ã¿Ìì 5 ´Î½âËø´ÎÊı', 'ÖĞ²¿ÆØ¹âÎ»', '»ù´¡Êı¾İÃæ°å'],
+      features: ['æ¯å¤© 5 æ¬¡è§£é”æ¬¡æ•°', 'ä¸­éƒ¨æ›å…‰ä½', 'åŸºç¡€æ•°æ®é¢æ¿'],
       recommended: false
     },
     {
       id: 'silver',
-      name: 'ÒøÅÆÀÏÊ¦',
+      name: 'é“¶ç‰Œè€å¸ˆ',
       price: 29.9,
       durationMonth: 1,
-      features: ['Ã¿Ìì 10 ´Î½âËø´ÎÊı', 'ÉÏ²¿ÆØ¹âÎ»', 'ÏêÏ¸±¨±í + ÊµÊ±Í¨Öª'],
+      features: ['æ¯å¤© 10 æ¬¡è§£é”æ¬¡æ•°', 'ä¸Šéƒ¨æ›å…‰ä½', 'è¯¦ç»†æŠ¥è¡¨ + å®æ—¶é€šçŸ¥'],
       recommended: true
     },
     {
       id: 'gold',
-      name: '½ğÅÆÀÏÊ¦',
+      name: 'é‡‘ç‰Œè€å¸ˆ',
       price: 49.9,
       durationMonth: 1,
-      features: ['ÎŞÏŞ½âËø´ÎÊı', '¶¥²¿ÖÃ¶¥ÆØ¹â', 'ÓÅÏÈÍÆ¼ö + ×¨Êô¿Í·ş'],
+      features: ['æ— é™è§£é”æ¬¡æ•°', 'é¡¶éƒ¨ç½®é¡¶æ›å…‰', 'ä¼˜å…ˆæ¨è + ä¸“å±å®¢æœ'],
       recommended: false
     }
   ])
@@ -698,9 +698,9 @@ app.post('/api/teacher/membership/subscribe', async (req, res) => {
   const planId = String(req.body?.plan_id || '')
   const autoRenew = Boolean(req.body?.auto_renew)
   const planMap = {
-    bronze: { name: 'Í­ÅÆÀÏÊ¦', unlock: 5, quota: 2 },
-    silver: { name: 'ÒøÅÆÀÏÊ¦', unlock: 10, quota: 5 },
-    gold: { name: '½ğÅÆÀÏÊ¦', unlock: 999, quota: 10 }
+    bronze: { name: 'é“œç‰Œè€å¸ˆ', unlock: 5, quota: 2 },
+    silver: { name: 'é“¶ç‰Œè€å¸ˆ', unlock: 10, quota: 5 },
+    gold: { name: 'é‡‘ç‰Œè€å¸ˆ', unlock: 999, quota: 10 }
   }
   const selected = planMap[planId]
   if (!selected) return fail(res, 404, 'Plan not found')
