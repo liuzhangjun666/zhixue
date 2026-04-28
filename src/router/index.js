@@ -68,7 +68,40 @@ const routes = [
   {
     path: '/teacher-center',
     name: 'TeacherCenter',
-    component: () => import('../views/TeacherCenter.vue')
+    component: () => import('../views/TeacherCenter.vue'),
+    redirect: '/teacher-center/edit',
+    children: [
+      {
+        path: 'edit',
+        name: 'TeacherEdit',
+        component: () => import('../views/teacher/EditProfile.vue')
+      },
+      {
+        path: 'requests',
+        name: 'TeacherRequests',
+        component: () => import('../views/teacher/Requests.vue')
+      },
+      {
+        path: 'reviews',
+        name: 'TeacherReviews',
+        component: () => import('../views/teacher/Reviews.vue')
+      },
+      {
+        path: 'analytics',
+        name: 'TeacherAnalytics',
+        component: () => import('../views/teacher/Analytics.vue')
+      },
+      {
+        path: 'vip',
+        name: 'TeacherVip',
+        component: () => import('../views/teacher/VipCenter.vue')
+      },
+      {
+        path: 'settings',
+        name: 'TeacherSettings',
+        component: () => import('../views/teacher/Settings.vue')
+      }
+    ]
   }
 ]
 

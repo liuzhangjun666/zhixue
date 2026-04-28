@@ -7,8 +7,11 @@ const route = useRoute()
 const currentPath = computed(() => route.path)
 
 // Hide login/register links if we are NOT on the login or register page.
-const isLoggedIn = computed(() => !['/login', '/register'].includes(route.path))
-const userRole = 'parent' // 'parent' or 'teacher'
+const isLoggedIn = computed(() => !['/login', '/register', '/teacher-auth'].includes(route.path))
+const userRole = computed(() => {
+  if (route.path.startsWith('/teacher')) return 'teacher'
+  return 'parent'
+})
 
 const unreadCount = ref(0) // 私信未读数
 const showNotifications = ref(false)
@@ -35,8 +38,9 @@ const closeNotifications = (e: Event) => {
 
 const fetchUnreadCount = async () => {
   if (!isLoggedIn.value) return
+  const userId = userRole.value === 'teacher' ? 2 : 1
   try {
-    const res = await fetch('http://localhost:8000/api/messages/unread-count?userId=1')
+    const res = await fetch(`http://localhost:8000/api/messages/unread-count?userId=${userId}`)
     const { data } = await res.json()
     if (data) {
       unreadCount.value = data.count
@@ -68,7 +72,7 @@ onUnmounted(() => {
           <li><router-link to="/" :class="{ active: currentPath === '/' }">首页</router-link></li>
           <li><router-link to="#" class="disabled">发现</router-link></li>
           <li>
-            <router-link to="/messages" class="nav-link-with-badge" :class="{ active: currentPath.includes('/messages') }">
+            <router-link :to="{ path: '/messages', query: { userId: userRole === 'teacher' ? '2' : '1' } }" class="nav-link-with-badge" :class="{ active: currentPath.includes('/messages') }">
               消息
               <span v-if="unreadCount > 0" class="text-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
             </router-link>
