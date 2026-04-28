@@ -8,27 +8,28 @@ const router = useRouter()
 const route = useRoute()
 const currentPath = computed(() => route.path)
 
-// Hide login/register links if we are NOT on the login or register page.
 const isLoggedIn = computed(() => !['/login', '/register', '/teacher-auth'].includes(route.path))
 const userRole = computed(() => {
   if (route.path.startsWith('/teacher')) return 'teacher'
   return 'parent'
 })
 
-const unreadCount = ref(0) // 私信未读数
+const unreadCount = ref(0)
 const showNotifications = ref(false)
 const systemNotifications = ref([
   { id: 1, title: '系统通知', content: '欢迎使用知学空间，请完善您的个人资料。', time: '刚刚', read: false },
   { id: 2, title: '课程提醒', content: '您有一节试听课即将开始。', time: '2小时前', read: false }
 ])
-const systemUnreadCount = computed(() => systemNotifications.value.filter(n => !n.read).length)
+const systemUnreadCount = computed(() => systemNotifications.value.filter((n) => !n.read).length)
 
 let pollInterval: any = null
 
 const toggleSystemNotifications = () => {
   showNotifications.value = !showNotifications.value
   if (showNotifications.value) {
-    systemNotifications.value.forEach(n => n.read = true)
+    systemNotifications.value.forEach((n) => {
+      n.read = true
+    })
   }
 }
 
@@ -61,7 +62,9 @@ const fetchUnreadCount = async () => {
     if (data) {
       unreadCount.value = data.count
     }
-  } catch(e) {}
+  } catch (_) {
+    // ignore transient network errors during polling
+  }
 }
 
 onMounted(() => {
@@ -88,22 +91,23 @@ onUnmounted(() => {
           <li><router-link to="/" :class="{ active: currentPath === '/' }">首页</router-link></li>
           <li><router-link to="#" class="disabled">发现</router-link></li>
           <li>
-            <router-link :to="{ path: '/messages', query: { userId: userRole === 'teacher' ? '2' : '1' } }" class="nav-link-with-badge" :class="{ active: currentPath.includes('/messages') }">
+            <router-link
+              :to="{ path: '/messages', query: { userId: userRole === 'teacher' ? '2' : '1' } }"
+              class="nav-link-with-badge"
+              :class="{ active: currentPath.includes('/messages') }"
+            >
               消息
               <span v-if="unreadCount > 0" class="text-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
             </router-link>
           </li>
           <li>
-            <router-link 
-              :to="userRole === 'teacher' ? '/teacher-center' : '/parent-center'"
-              :class="{ active: currentPath.includes('-center') }"
-            >
+            <router-link :to="userRole === 'teacher' ? '/teacher-center' : '/parent-center'" :class="{ active: currentPath.includes('-center') }">
               我的
             </router-link>
           </li>
         </ul>
       </div>
-      
+
       <div class="nav-right">
         <template v-if="!isLoggedIn">
           <router-link to="/login" class="nav-link">登录</router-link>
@@ -112,14 +116,12 @@ onUnmounted(() => {
         </template>
         <template v-else>
           <div class="user-actions">
-            <!-- 系统通知小铃铛 -->
             <div class="notification-container">
               <button class="icon-btn notification-btn" @click.stop="toggleSystemNotifications">
                 <Bell class="nav-icon" />
                 <span v-if="systemUnreadCount > 0" class="badge"></span>
               </button>
-              
-              <!-- 通知下拉面板 -->
+
               <div v-if="showNotifications" class="notification-dropdown">
                 <div class="dropdown-header">
                   <h4>系统通知</h4>

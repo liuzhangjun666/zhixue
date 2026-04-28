@@ -94,7 +94,7 @@ const ensureArray = (value: unknown): string[] => {
   if (typeof value === 'string') {
     if (!value.trim()) return []
     return value
-      .split(/[,,����\s]+/)
+      .split(/[,,，、\s]+/)
       .map((item) => item.trim())
       .filter(Boolean)
   }
@@ -128,7 +128,7 @@ const normalizeRequest = (raw: Record<string, any>): TeacherRequestDTO => ({
   budget: String(raw.budget || ''),
   schedule: String(raw.schedule || ''),
   status: parseStatus(raw.status),
-  parentName: String(raw.parentName || raw.parent_name || '�ҳ�'),
+  parentName: String(raw.parentName || raw.parent_name || '家长'),
   teacherName: String(raw.teacherName || raw.teacher_name || ''),
   isMine: Boolean(raw.isMine || raw.is_mine),
   createdAt: String(raw.createdAt || raw.created_at || '')
@@ -136,7 +136,7 @@ const normalizeRequest = (raw: Record<string, any>): TeacherRequestDTO => ({
 
 const normalizeReview = (raw: Record<string, any>): TeacherReviewDTO => ({
   id: Number(raw.id || 0),
-  parentName: String(raw.parentName || raw.parent_name || '�ҳ�'),
+  parentName: String(raw.parentName || raw.parent_name || '家长'),
   subject: String(raw.subject || ''),
   rating: Number(raw.rating || 0),
   content: String(raw.content || ''),
@@ -155,7 +155,7 @@ const normalizeAnalytics = (raw: Record<string, any>): TeacherAnalyticsDTO => ({
 })
 
 const normalizeMembershipStatus = (raw: Record<string, any>): TeacherMembershipStatusDTO => ({
-  planName: String(raw.planName || raw.plan_name || '��ͨ��ʦ'),
+  planName: String(raw.planName || raw.plan_name || '普通老师'),
   expireAt: raw.expireAt || raw.expire_at || null,
   remainingUnlock: Number(raw.remainingUnlock || raw.remaining_unlock || 0),
   weeklyPriorityQuota: Number(raw.weeklyPriorityQuota || raw.weekly_priority_quota || 0)
