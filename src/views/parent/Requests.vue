@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { ArrowLeft } from 'lucide-vue-next'
 import { parentApi, type ParentRequestDTO, type RequestStatus } from '../../api/parent'
 import Modal from '../../components/Modal.vue'
 
@@ -125,9 +126,14 @@ onMounted(loadRequests)
 <template>
   <section class="module-page">
     <header class="module-header">
-      <div>
-        <h1>我的请求</h1>
-        <p>管理家教需求，跟踪匹配、约课和完成状态。</p>
+      <div class="header-left">
+        <button class="btn-icon-back" @click="router.push('/parent-center')">
+          <ArrowLeft :size="20" />
+        </button>
+        <div>
+          <h1>我的请求</h1>
+          <p>管理家教需求，跟踪匹配、约课和完成状态。</p>
+        </div>
       </div>
       <button class="btn-primary" @click="showCreateModal = true">新建请求</button>
     </header>
@@ -174,7 +180,7 @@ onMounted(loadRequests)
           <button class="btn-secondary" v-if="item.status === 'scheduled'" @click="completeRequest(item.id)" :disabled="actioningId === item.id">
             标记完成
           </button>
-          <button class="btn-ghost" @click="router.push(`/parent-center/requests/${item.id}`)">查看详情</button>
+          <button class="btn-ghost" @click="router.push(`/parent/requests/${item.id}`)">查看详情</button>
         </div>
       </article>
     </div>
@@ -237,6 +243,31 @@ onMounted(loadRequests)
   border: 1px solid #e5e7eb;
   border-radius: 18px;
   padding: 20px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.btn-icon-back {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #F5F5F7;
+  color: #1D1D1F;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-icon-back:hover {
+  background: #E5E5EA;
+  transform: translateX(-2px);
 }
 
 h1 {

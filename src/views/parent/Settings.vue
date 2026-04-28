@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { ArrowLeft } from 'lucide-vue-next'
 import { parentApi } from '../../api/parent'
+
+const router = useRouter()
 
 const securityForm = reactive({
   currentPassword: '',
@@ -95,8 +99,15 @@ onMounted(loadSettings)
 <template>
   <section class="module-page">
     <header class="module-header">
-      <h1>账户设置</h1>
-      <p>管理安全信息、通知偏好和隐私权限。</p>
+      <div class="header-left">
+        <button class="btn-icon-back" @click="router.push('/parent-center')">
+          <ArrowLeft :size="20" />
+        </button>
+        <div>
+          <h1>账户设置</h1>
+          <p>管理安全信息、通知偏好和隐私权限。</p>
+        </div>
+      </div>
     </header>
 
     <article class="module-card" v-if="loading">
@@ -189,6 +200,31 @@ onMounted(loadSettings)
   border: 1px solid #e5e7eb;
   border-radius: 18px;
   padding: 20px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.btn-icon-back {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #F5F5F7;
+  color: #1D1D1F;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-icon-back:hover {
+  background: #E5E5EA;
+  transform: translateX(-2px);
 }
 
 h1,

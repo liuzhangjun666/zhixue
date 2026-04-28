@@ -26,7 +26,7 @@ const route = useRoute()
 <style scoped>
 .app-main {
   min-height: calc(100vh - 60px - 60px); /* 减去导航和底部高度 */
-  padding: 48px;
+  padding: var(--page-padding);
   max-width: var(--max-width);
   margin: 0 auto;
 }

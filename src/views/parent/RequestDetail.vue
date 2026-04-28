@@ -7,7 +7,7 @@ const router = useRouter()
 const requestId = ref(route.params.id)
 
 const goBack = () => {
-  router.push('/parent-center/requests')
+  router.push('/parent/requests')
 }
 </script>
 

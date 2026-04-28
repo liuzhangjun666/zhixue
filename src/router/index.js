@@ -30,40 +30,37 @@ const routes = [
   {
     path: '/parent-center',
     name: 'ParentCenter',
-    component: () => import('../views/ParentCenter.vue'),
-    redirect: '/parent-center/edit',
-    children: [
-      {
-        path: 'edit',
-        name: 'ParentEdit',
-        component: () => import('../views/parent/EditProfile.vue')
-      },
-      {
-        path: 'requests',
-        name: 'ParentRequests',
-        component: () => import('../views/parent/Requests.vue')
-      },
-      {
-        path: 'requests/:id',
-        name: 'ParentRequestDetail',
-        component: () => import('../views/parent/RequestDetail.vue')
-      },
-      {
-        path: 'reviews',
-        name: 'ParentReviews',
-        component: () => import('../views/parent/Reviews.vue')
-      },
-      {
-        path: 'vip',
-        name: 'ParentVip',
-        component: () => import('../views/parent/VipCenter.vue')
-      },
-      {
-        path: 'settings',
-        name: 'ParentSettings',
-        component: () => import('../views/parent/Settings.vue')
-      }
-    ]
+    component: () => import('../views/ParentCenter.vue')
+  },
+  {
+    path: '/parent/edit',
+    name: 'ParentEdit',
+    component: () => import('../views/parent/EditProfile.vue')
+  },
+  {
+    path: '/parent/requests',
+    name: 'ParentRequests',
+    component: () => import('../views/parent/Requests.vue')
+  },
+  {
+    path: '/parent/requests/:id',
+    name: 'ParentRequestDetail',
+    component: () => import('../views/parent/RequestDetail.vue')
+  },
+  {
+    path: '/parent/reviews',
+    name: 'ParentReviews',
+    component: () => import('../views/parent/Reviews.vue')
+  },
+  {
+    path: '/parent/vip',
+    name: 'ParentVip',
+    component: () => import('../views/parent/VipCenter.vue')
+  },
+  {
+    path: '/parent/settings',
+    name: 'ParentSettings',
+    component: () => import('../views/parent/Settings.vue')
   },
   {
     path: '/teacher-center',

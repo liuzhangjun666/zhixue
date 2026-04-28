@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { ArrowLeft } from 'lucide-vue-next'
 import { parentApi } from '../../api/parent'
+
+const router = useRouter()
 
 interface ChildProfile {
   id: number
@@ -213,9 +217,14 @@ onBeforeUnmount(() => {
 <template>
   <section class="module-page">
     <header class="module-header">
-      <div>
-        <h1>编辑资料</h1>
-        <p>维护家长信息、学生档案和偏好科目。</p>
+      <div class="header-left">
+        <button class="btn-icon-back" @click="router.push('/parent-center')">
+          <ArrowLeft :size="20" />
+        </button>
+        <div>
+          <h1>编辑资料</h1>
+          <p>维护家长信息、学生档案和偏好科目。</p>
+        </div>
       </div>
       <button class="btn-primary" :disabled="saving" @click="handleSave">
         {{ saving ? '保存中...' : '保存资料' }}
@@ -369,8 +378,33 @@ onBeforeUnmount(() => {
   padding: 24px;
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 20px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.btn-icon-back {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #F5F5F7;
+  color: #1D1D1F;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-icon-back:hover {
+  background: #E5E5EA;
+  transform: translateX(-2px);
 }
 
 h1 {
