@@ -30,11 +30,11 @@
       </div>
     </div>
 
-    <!-- 主面板：聊天区 -->
+    <!-- 主面板：聊天�?-->
     <div class="chat-main">
       <template v-if="currentConversation">
         <div class="chat-header">
-          <h3>与 {{ currentConversation.contactName }} 的对话</h3>
+          <h3>�?{{ currentConversation.contactName }} 的对�?/h3>
         </div>
         
         <div class="messages-list" ref="messagesListRef">
@@ -58,13 +58,13 @@
           />
           <button class="send-btn" @click="sendMessage" :disabled="!newMessage.trim()">
             <SendIcon class="icon" />
-            发送
+            发�?
           </button>
         </div>
       </template>
       <div v-else class="empty-chat">
         <MessageSquareIcon class="large-icon" />
-        <p>选择一个联系人开始聊天</p>
+        <p>选择一个联系人开始聊�?/p>
       </div>
     </div>
   </div>
@@ -72,10 +72,12 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import { User as UserIcon, Send as SendIcon, MessageSquare as MessageSquareIcon } from 'lucide-vue-next'
 import { io } from 'socket.io-client'
 
-const currentUserId = 1 // 测试环境默认当前用户ID
+const route = useRoute()
+const currentUserId = Number(route.query.userId || 1)
 
 const conversations = ref([])
 const currentConversation = ref(null)
@@ -148,12 +150,12 @@ onMounted(() => {
   })
 
   socket.on('receive_message', (msg) => {
-    // 如果收到的消息属于当前打开的会话
+    // 如果收到的消息属于当前打开的会�?
     if (currentConversation.value && msg.conversationId === currentConversation.value.id) {
       currentMessages.value.push(msg)
       scrollToBottom()
     }
-    // 重新加载会话列表更新最新消息
+    // 重新加载会话列表更新最新消�?
     loadConversations()
   })
 
@@ -422,3 +424,4 @@ onUnmounted(() => {
   color: #86868b;
 }
 </style>
+

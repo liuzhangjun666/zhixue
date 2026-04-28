@@ -1,318 +1,346 @@
-<script setup>
-import { ref } from 'vue'
-import GlassCard from '../components/GlassCard.vue'
-import Modal from '../components/Modal.vue'
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { Edit3, ClipboardList, Star, BarChart3, Crown, Settings, ChevronRight } from 'lucide-vue-next'
+import { teacherApi, type TeacherMembershipStatusDTO, type TeacherProfileDTO } from '../api/teacher'
 
-const showExposureModal = ref(false)
+interface MenuItem {
+  title: string
+  icon: any
+  path: string
+  highlight?: boolean
+}
+
+const route = useRoute()
+const router = useRouter()
+
+const profile = ref<TeacherProfileDTO | null>(null)
+const membership = ref<TeacherMembershipStatusDTO | null>(null)
+const loading = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
+
+const menuItems: MenuItem[] = [
+  { title: '�༭����', icon: Edit3, path: '/teacher-center/edit' },
+  { title: '�յ�������', icon: ClipboardList, path: '/teacher-center/requests' },
+  { title: '�ҵ�����', icon: Star, path: '/teacher-center/reviews' },
+  { title: '��������', icon: BarChart3, path: '/teacher-center/analytics' },
+  { title: '��Ա����', icon: Crown, path: '/teacher-center/vip', highlight: true },
+  { title: '�˻�����', icon: Settings, path: '/teacher-center/settings' }
+]
+
+const rankName = computed(() => membership.value?.planName || '��ͨ��ʦ')
+
+const loadData = async () => {
+  loading.value = true
+  try {
+    const [profileData, membershipData] = await Promise.all([teacherApi.getProfile(), teacherApi.getMembershipStatus()])
+    profile.value = profileData
+    membership.value = membershipData
+  } catch (error) {
+    console.error('Failed to load teacher center data:', error)
+  } finally {
+    loading.value = false
+  }
+}
+
+const triggerAvatarUpload = () => {
+  fileInput.value?.click()
+}
+
+const onFileChange = (event: Event) => {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+
+  const reader = new FileReader()
+  reader.onload = async (e) => {
+    const base64 = e.target?.result as string
+    if (!base64) return
+    if (profile.value) {
+      profile.value.avatar = base64
+    }
+    try {
+      await teacherApi.uploadAvatar(base64)
+    } catch (error) {
+      console.error('Failed to upload avatar:', error)
+    }
+  }
+  reader.readAsDataURL(file)
+}
+
+const navigateTo = (path: string) => {
+  if (!path) return
+  router.push(path).catch(() => {})
+}
+
+onMounted(loadData)
 </script>
 
 <template>
-  <div class="dashboard-layout teacher-theme">
-    <div class="left-col">
-      <!-- 数据概览面板 -->
-      <GlassCard class="mb-4">
-        <h3 class="mb-3">📊 数据概览</h3>
-        <div class="data-panel">
-          <div class="data-item">
-            <div class="data-label">本周浏览</div>
-            <div class="data-value text-primary">156 <span class="data-unit">次</span></div>
+  <div class="teacher-center-layout container">
+    <aside class="teacher-sidebar">
+      <div class="teacher-card">
+        <div class="profile-row">
+          <div class="avatar" @click="triggerAvatarUpload">
+            <img :src="profile?.avatar || 'https://api.dicebear.com/7.x/adventurer/svg?seed=Teacher'" alt="avatar" />
+            <div class="avatar-overlay">����ͷ��</div>
+            <input ref="fileInput" type="file" accept="image/png, image/jpeg" class="hidden-input" @change="onFileChange" />
           </div>
-          <div class="data-divider"></div>
-          <div class="data-item">
-            <div class="data-label">历史浏览</div>
-            <div class="data-value text-primary">1208 <span class="data-unit">次</span></div>
+          <div class="profile-meta">
+            <h2>{{ profile?.teacherName || (loading ? '������...' : '��ʦ') }}</h2>
+            <p>{{ profile?.city || '���ڳ���δ����' }}</p>
+            <p class="sub">�������֣�4.9</p>
           </div>
-          <div class="data-divider"></div>
-          <div class="data-item">
-            <div class="data-label">待处理请求</div>
-            <div class="data-value text-danger">3 <span class="data-unit">单</span></div>
-          </div>
-        </div>
-      </GlassCard>
-      
-      <!-- 会员/曝光卡片 -->
-      <div class="vip-card">
-        <div class="vip-header">
-          <div>
-            <div class="vip-title">🥇 金牌老师</div>
-            <div class="vip-date">到期：2026-05-15</div>
-          </div>
-          <button class="btn btn-sm vip-btn" @click="showExposureModal = true">提升曝光</button>
-        </div>
-        <div class="vip-divider"></div>
-        <div class="vip-benefits">
-          <div class="benefit-item">• 曝光位置：顶部置顶</div>
-          <div class="benefit-item">• 本周展现：8,542次</div>
-          <div class="benefit-item">• 剩余免费解锁配额：无限</div>
+          <button class="btn-edit" @click="navigateTo('/teacher-center/edit')">�༭</button>
         </div>
       </div>
-    </div>
-    
-    <div class="right-col">
-      <GlassCard>
-        <h3 class="menu-title mb-3">常用功能</h3>
-        <ul class="menu-list">
-          <li class="menu-item">
-            <div class="menu-left">
-              <span class="menu-icon">📝</span>
-              <span>编辑资料</span>
-            </div>
-            <span class="menu-arrow">›</span>
-          </li>
-          <li class="menu-item">
-            <div class="menu-left">
-              <span class="menu-icon">📋</span>
-              <span>收到的辅导请求</span>
-            </div>
-            <div class="menu-right">
-              <span class="badge-red">3</span>
-              <span class="menu-arrow">›</span>
-            </div>
-          </li>
-          <li class="menu-item">
-            <div class="menu-left">
-              <span class="menu-icon">⭐</span>
-              <span>家长评价</span>
-            </div>
-            <div class="menu-right">
-              <span class="text-light" style="font-size: 14px;">4.9 分</span>
-              <span class="menu-arrow">›</span>
-            </div>
-          </li>
-          <li class="menu-item" @click="showExposureModal = true">
-            <div class="menu-left">
-              <span class="menu-icon">💳</span>
-              <span class="text-primary fw-bold">会员中心 (曝光升级)</span>
-            </div>
-            <span class="menu-arrow text-primary">›</span>
-          </li>
-          <li class="menu-item">
-            <div class="menu-left">
-              <span class="menu-icon">⚙️</span>
-              <span>账户设置</span>
-            </div>
-            <span class="menu-arrow">›</span>
+
+      <div class="membership-card">
+        <div>
+          <div class="membership-title">{{ rankName }}</div>
+          <div class="membership-expire">���ڣ�{{ membership?.expireAt || 'δ��ͨ' }}</div>
+        </div>
+        <div class="membership-benefits">
+          <div>����������{{ membership?.weeklyPriorityQuota ?? 0 }} ��</div>
+          <div>ʣ�������{{ membership?.remainingUnlock ?? 0 }} ��</div>
+        </div>
+        <button class="btn-membership" @click="navigateTo('/teacher-center/vip')">�����ع�</button>
+      </div>
+
+      <div class="teacher-card menu-card">
+        <h3>���ù���</h3>
+        <ul>
+          <li v-for="item in menuItems" :key="item.path">
+            <button class="menu-item" :class="{ active: route.path === item.path, highlight: item.highlight }" @click="navigateTo(item.path)">
+              <span class="menu-left">
+                <component :is="item.icon" class="menu-icon" />
+                <span>{{ item.title }}</span>
+              </span>
+              <ChevronRight class="menu-arrow" />
+            </button>
           </li>
         </ul>
-      </GlassCard>
-    </div>
-    
-    <!-- 提升曝光弹窗 -->
-    <Modal :show="showExposureModal" title="📈 提升曝光，获取更多生源" @close="showExposureModal = false">
-      <div class="exposure-modal-content">
-        <div class="plan-card silver-plan">
-          <div class="plan-header">
-            <div class="plan-title">🥈 银牌老师</div>
-            <div class="plan-price">¥ 29.9<span class="unit">/月</span></div>
-          </div>
-          <ul class="plan-features">
-            <li>• 解锁次数：10次/天</li>
-            <li>• 曝光位置：上部优先</li>
-            <li>• 详细报表+实时通知</li>
-          </ul>
-          <button class="btn btn-ghost w-100 mt-3 border-silver" style="border: 1px solid var(--color-border); color: var(--color-text-main);">立即开通</button>
-        </div>
-        
-        <div class="plan-card gold-plan recommended">
-          <div class="badge-recommend">⭐ 推荐</div>
-          <div class="plan-header">
-            <div class="plan-title text-primary">🥇 金牌老师</div>
-            <div class="plan-price text-parent">¥ 49.9<span class="unit text-light">/月</span></div>
-          </div>
-          <ul class="plan-features">
-            <li>• 解锁次数：无限次数</li>
-            <li>• 曝光位置：顶部置顶，独享流量</li>
-            <li>• 优先推荐+专属客服指导</li>
-          </ul>
-          <button class="btn btn-teacher w-100 mt-3">立即开通</button>
-        </div>
       </div>
-    </Modal>
+    </aside>
+
+    <main class="teacher-main">
+      <router-view v-slot="{ Component }">
+        <transition name="fade" mode="out-in">
+          <component :is="Component" />
+        </transition>
+      </router-view>
+    </main>
   </div>
 </template>
 
 <style scoped>
-.teacher-theme {
-  --color-primary: var(--color-teacher);
-  --gradient-primary: var(--gradient-teacher);
-}
-
-.text-primary { color: var(--color-primary); }
-.text-danger { color: var(--color-danger); }
-.text-parent { color: var(--color-parent); }
-
-.dashboard-layout {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 32px;
-}
-
-/* 数据面板 */
-.data-panel {
+.teacher-center-layout {
   display: flex;
-  align-items: center;
-  justify-content: space-around;
-  background: var(--color-bg-page);
+  gap: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
   padding: 24px;
-  border-radius: 12px;
+  align-items: flex-start;
 }
 
-.data-item {
-  text-align: center;
-}
-
-.data-label {
-  font-size: 12px;
-  color: var(--color-text-sub);
-  margin-bottom: 8px;
-}
-
-.data-value {
-  font-size: 28px;
-  font-weight: bold;
-}
-
-.data-unit {
-  font-size: 14px;
-  font-weight: normal;
-}
-
-.data-divider {
-  width: 1px;
-  height: 40px;
-  background: var(--color-border);
-}
-
-/* 会员卡片 */
-.vip-card {
-  background: var(--gradient-teacher);
-  border-radius: 16px;
-  padding: 32px;
-  color: white;
-  box-shadow: 0 8px 24px rgba(16, 168, 129, 0.2);
-}
-
-.vip-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.vip-title {
-  font-size: 20px;
-  font-weight: bold;
-  margin-bottom: 8px;
-}
-
-.vip-date {
-  font-size: 14px;
-  opacity: 0.8;
-}
-
-.vip-btn {
-  background: white;
-  color: var(--color-teacher);
-  border-radius: 20px;
-}
-
-.vip-divider {
-  height: 1px;
-  background: rgba(255, 255, 255, 0.2);
-  margin: 24px 0;
-}
-
-.vip-benefits {
-  font-size: 15px;
-  line-height: 1.8;
-}
-
-.benefit-item {
-  margin-bottom: 4px;
-}
-
-/* 右侧菜单 */
-.menu-title { font-size: 18px; font-weight: bold; }
-.menu-list { display: flex; flex-direction: column; }
-.menu-item { display: flex; justify-content: space-between; align-items: center; height: 56px; border-bottom: 1px solid var(--color-border); cursor: pointer; transition: background 0.3s; }
-.menu-item:hover { background: var(--color-bg-page); }
-.menu-item:last-child { border-bottom: none; }
-.menu-left { display: flex; align-items: center; gap: 12px; font-size: 15px; }
-.menu-icon { font-size: 20px; }
-.menu-right { display: flex; align-items: center; gap: 8px; }
-.menu-arrow { font-size: 18px; color: var(--color-text-light); }
-.badge-red { background: var(--color-danger); color: white; font-size: 12px; padding: 2px 6px; border-radius: 10px; }
-
-/* 提升曝光弹窗 */
-.exposure-modal-content {
+.teacher-sidebar {
+  width: 320px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 16px 0;
+  gap: 20px;
 }
 
-.plan-card {
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
+.teacher-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.teacher-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 20px;
   padding: 24px;
-  position: relative;
-  transition: all 0.3s;
 }
 
-.plan-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.05);
-}
-
-.plan-header {
+.profile-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  gap: 16px;
+  position: relative;
 }
 
-.plan-title {
-  font-size: 18px;
-  font-weight: bold;
+.avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid #d1d5db;
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
-.plan-price {
-  font-size: 24px;
-  font-weight: bold;
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
-.unit {
-  font-size: 14px;
-  font-weight: normal;
-}
-
-.plan-features {
-  font-size: 14px;
-  color: var(--color-text-sub);
-  line-height: 1.8;
-}
-
-.recommended {
-  border-color: var(--color-primary);
-  background: white;
-  box-shadow: 0 4px 24px rgba(16, 168, 129, 0.1);
-}
-
-.badge-recommend {
+.avatar-overlay {
   position: absolute;
-  top: -12px;
-  right: 24px;
-  background: var(--color-primary);
-  color: white;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
   font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s ease;
 }
 
-.w-100 { width: 100%; }
+.avatar:hover .avatar-overlay {
+  opacity: 1;
+}
+
+.hidden-input {
+  display: none;
+}
+
+.profile-meta h2 {
+  margin: 0;
+  font-size: 22px;
+  color: #111827;
+}
+
+.profile-meta p {
+  margin-top: 4px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.profile-meta .sub {
+  color: #10a881;
+}
+
+.btn-edit {
+  margin-left: auto;
+  border: none;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #111827;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.membership-card {
+  border-radius: 20px;
+  padding: 24px;
+  background: linear-gradient(135deg, #10a881 0%, #059669 100%);
+  color: #fff;
+  box-shadow: 0 12px 30px -12px rgba(16, 168, 129, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.membership-title {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.membership-expire {
+  font-size: 13px;
+  opacity: 0.86;
+  margin-top: 2px;
+}
+
+.membership-benefits {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.btn-membership {
+  margin-top: 4px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  padding: 10px 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.menu-card h3 {
+  margin: 0 0 8px;
+  color: #111827;
+  font-size: 18px;
+}
+
+.menu-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  height: 52px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  cursor: pointer;
+  color: #111827;
+}
+
+.menu-item:hover {
+  background: #f3f4f6;
+}
+
+.menu-item.active {
+  background: rgba(16, 168, 129, 0.12);
+  color: #047857;
+}
+
+.menu-item.highlight {
+  font-weight: 700;
+}
+
+.menu-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.menu-icon,
+.menu-arrow {
+  width: 18px;
+  height: 18px;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.fade-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
 
 @media (max-width: 992px) {
-  .dashboard-layout {
-    grid-template-columns: 1fr;
+  .teacher-center-layout {
+    flex-direction: column;
+  }
+
+  .teacher-sidebar {
+    width: 100%;
   }
 }
 </style>
