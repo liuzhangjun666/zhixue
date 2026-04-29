@@ -1,33 +1,50 @@
-<script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+﻿<script setup lang="ts">
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Bell, User, LogOut } from 'lucide-vue-next'
-import { AUTH_TOKEN_STORAGE_KEY, AUTH_USER_STORAGE_KEY, request, unwrapData } from '../api/http'
+import { io } from 'socket.io-client'
+import { API_BASE_URL, AUTH_TOKEN_STORAGE_KEY, AUTH_USER_STORAGE_KEY, request, unwrapData } from '../api/http'
 import { logout } from '../api/auth'
 
 const router = useRouter()
-
 const route = useRoute()
 const currentPath = computed(() => route.path)
 
-const isLoggedIn = computed(() => {
-  if (typeof window === 'undefined') return false
-  return Boolean(window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY))
-})
-const userRole = computed(() => {
-  if (typeof window !== 'undefined') {
-    try {
-      const raw = window.localStorage.getItem(AUTH_USER_STORAGE_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (parsed?.role === 'teacher') return 'teacher'
-        if (parsed?.role === 'parent') return 'parent'
-      }
-    } catch {}
+const isLoggedIn = ref(false)
+const storedUser = ref<{ id?: number | string; role?: string } | null>(null)
+
+const syncAuthState = () => {
+  if (typeof window === 'undefined') {
+    isLoggedIn.value = false
+    storedUser.value = null
+    return
   }
+  const token = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || ''
+  const userRaw = window.localStorage.getItem(AUTH_USER_STORAGE_KEY) || ''
+  if (!token || !userRaw) {
+    isLoggedIn.value = false
+    storedUser.value = null
+    return
+  }
+  try {
+    const parsed = JSON.parse(userRaw)
+    storedUser.value = parsed && typeof parsed === 'object' ? parsed : null
+    isLoggedIn.value = Boolean(storedUser.value)
+  } catch {
+    storedUser.value = null
+    isLoggedIn.value = false
+  }
+}
+
+const userRole = computed(() => {
+  const role = String(storedUser.value?.role || '')
+  if (role === 'teacher' || role === 'parent') return role
   if (route.path.startsWith('/teacher')) return 'teacher'
   return 'parent'
 })
+
+const userId = computed(() => Number(storedUser.value?.id || 0))
+const discoverPath = computed(() => (userRole.value === 'teacher' ? '/teacher-center/match-pool' : '/parent/requests'))
 
 const unreadCount = ref(0)
 const showNotifications = ref(false)
@@ -37,42 +54,13 @@ const systemNotifications = ref([
 ])
 const systemUnreadCount = computed(() => systemNotifications.value.filter((n) => !n.read).length)
 
-let pollInterval: any = null
+let logoutToastTimer: number | null = null
+let unreadSocket: any = null
+const WS_BASE_URL = API_BASE_URL ? new URL(API_BASE_URL, window.location.origin).origin : window.location.origin
 
-const getSystemReadStorageKey = () => {
-  if (typeof window === 'undefined') return 'system_notice_read_guest'
-  let userKey = 'guest'
-  try {
-    const raw = window.localStorage.getItem(AUTH_USER_STORAGE_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw)
-      if (parsed?.id) userKey = String(parsed.id)
-    }
-  } catch {}
-  return `system_notice_read_${userKey}`
-}
-
-const restoreSystemNotificationRead = () => {
-  if (typeof window === 'undefined') return
-  try {
-    const raw = window.localStorage.getItem(getSystemReadStorageKey())
-    if (!raw) return
-    const readIds = JSON.parse(raw)
-    const readSet = new Set(Array.isArray(readIds) ? readIds.map((id: unknown) => Number(id)) : [])
-    systemNotifications.value = systemNotifications.value.map((item) => ({
-      ...item,
-      read: readSet.has(item.id)
-    }))
-  } catch {
-    // ignore invalid local cache
-  }
-}
-
-const persistSystemNotificationRead = () => {
-  if (typeof window === 'undefined') return
-  const readIds = systemNotifications.value.filter((item) => item.read).map((item) => item.id)
-  window.localStorage.setItem(getSystemReadStorageKey(), JSON.stringify(readIds))
-}
+const showUserMenu = ref(false)
+const logoutToastVisible = ref(false)
+const logoutToastText = ref('')
 
 const toggleSystemNotifications = () => {
   showNotifications.value = !showNotifications.value
@@ -84,6 +72,10 @@ const toggleSystemNotifications = () => {
   }
 }
 
+const toggleUserMenu = () => {
+  showUserMenu.value = !showUserMenu.value
+}
+
 const closeNotifications = (e: Event) => {
   if (!(e.target as Element).closest('.notification-container')) {
     showNotifications.value = false
@@ -93,40 +85,110 @@ const closeNotifications = (e: Event) => {
   }
 }
 
-const showUserMenu = ref(false)
-
-const toggleUserMenu = () => {
-  showUserMenu.value = !showUserMenu.value
-}
-
 const handleLogout = () => {
   showUserMenu.value = false
-  logout().finally(() => {
-    router.push('/login')
-  })
+  logout()
+    .then(() => {
+      logoutToastText.value = '已退出登录'
+      logoutToastVisible.value = true
+      if (logoutToastTimer) window.clearTimeout(logoutToastTimer)
+      logoutToastTimer = window.setTimeout(() => {
+        logoutToastVisible.value = false
+      }, 1800)
+    })
+    .finally(() => {
+      disconnectUnreadSocket()
+      unreadCount.value = 0
+      syncAuthState()
+      router.push('/')
+    })
 }
 
 const fetchUnreadCount = async () => {
-  if (!isLoggedIn.value) return
+  if (!isLoggedIn.value || !userId.value) {
+    unreadCount.value = 0
+    return
+  }
   try {
     const payload = await request('/api/messages/unread-count')
     const data = unwrapData(payload, { count: 0 })
     unreadCount.value = Number(data.count || 0)
-  } catch (_) {
-    // ignore transient network errors during polling
+  } catch {
+    // Ignore transient network errors during polling.
   }
 }
 
-onMounted(() => {
-  restoreSystemNotificationRead()
+const disconnectUnreadSocket = () => {
+  if (unreadSocket) {
+    unreadSocket.disconnect()
+    unreadSocket = null
+  }
+}
+
+const connectUnreadSocket = () => {
+  if (!isLoggedIn.value || !userId.value) {
+    disconnectUnreadSocket()
+    unreadCount.value = 0
+    return
+  }
+
+  const token = typeof window !== 'undefined' ? window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '' : ''
+  if (!token) {
+    disconnectUnreadSocket()
+    unreadCount.value = 0
+    return
+  }
+
+  if (unreadSocket) return
+
+  unreadSocket = io(WS_BASE_URL, { auth: { token } })
+
+  unreadSocket.on('messages:unread-count', (payload: { count?: number }) => {
+    unreadCount.value = Number(payload?.count || 0)
+  })
+
+  unreadSocket.on('connect', () => {
+    fetchUnreadCount()
+  })
+}
+
+const handleStorageChange = (event: StorageEvent) => {
+  if (!event.key || event.key === AUTH_TOKEN_STORAGE_KEY || event.key === AUTH_USER_STORAGE_KEY) {
+    syncAuthState()
+    connectUnreadSocket()
+    fetchUnreadCount()
+  }
+}
+
+const handleWindowFocus = () => {
+  syncAuthState()
+  connectUnreadSocket()
   fetchUnreadCount()
-  pollInterval = setInterval(fetchUnreadCount, 3000)
+}
+
+watch(
+  () => route.fullPath,
+  () => {
+    syncAuthState()
+    connectUnreadSocket()
+  }
+)
+
+onMounted(() => {
+  syncAuthState()
+  fetchUnreadCount()
+  connectUnreadSocket()
   document.addEventListener('click', closeNotifications)
+  window.addEventListener('storage', handleStorageChange)
+  window.addEventListener('focus', handleWindowFocus)
 })
 
 onUnmounted(() => {
-  if (pollInterval) clearInterval(pollInterval)
+  disconnectUnreadSocket()
+  if (logoutToastTimer) window.clearTimeout(logoutToastTimer)
   document.removeEventListener('click', closeNotifications)
+  window.removeEventListener('storage', handleStorageChange)
+  window.removeEventListener('focus', handleWindowFocus)
 })
 </script>
 
@@ -135,12 +197,12 @@ onUnmounted(() => {
     <div class="navbar-container">
       <div class="nav-left">
         <div class="logo">
-          <div class="logo-icon">🎓</div>
+          <div class="logo-icon">学</div>
           <span class="logo-text">知学空间</span>
         </div>
         <ul class="nav-menu">
           <li><router-link to="/" :class="{ active: currentPath === '/' }">首页</router-link></li>
-          <li><router-link to="#" class="disabled">发现</router-link></li>
+          <li><router-link :to="discoverPath" :class="{ active: currentPath.includes('/match-pool') || currentPath.includes('/parent/requests') }">发现</router-link></li>
           <li>
             <router-link
               to="/messages"
@@ -164,6 +226,8 @@ onUnmounted(() => {
           <router-link to="/login" class="nav-link">登录</router-link>
           <span class="divider">/</span>
           <router-link to="/register" class="nav-link">注册</router-link>
+          <span class="divider">/</span>
+          <router-link to="/teacher-auth" class="nav-link">老师入口</router-link>
         </template>
         <template v-else>
           <div class="user-actions">
@@ -192,7 +256,6 @@ onUnmounted(() => {
                 <User class="avatar-icon" />
               </div>
 
-              <!-- 用户下拉菜单 -->
               <div v-if="showUserMenu" class="user-dropdown">
                 <div class="user-dropdown-item logout" @click="handleLogout">
                   <LogOut class="dropdown-item-icon" />
@@ -204,6 +267,10 @@ onUnmounted(() => {
         </template>
       </div>
     </div>
+
+    <transition name="toast-fade">
+      <div v-if="logoutToastVisible" class="logout-toast">{{ logoutToastText }}</div>
+    </transition>
   </nav>
 </template>
 
@@ -493,7 +560,6 @@ onUnmounted(() => {
   height: 20px;
 }
 
-/* 用户下拉菜单 */
 .user-dropdown {
   position: absolute;
   top: 100%;
@@ -560,8 +626,33 @@ onUnmounted(() => {
   .navbar-container {
     padding: 0 16px;
   }
+
   .nav-menu {
     display: none;
   }
+}
+
+.logout-toast {
+  position: fixed;
+  top: 76px;
+  right: 24px;
+  background: #111827;
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  z-index: 999;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.18);
+}
+
+.toast-fade-enter-active,
+.toast-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.toast-fade-enter-from,
+.toast-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
 }
 </style>

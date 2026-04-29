@@ -1,8 +1,8 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Edit3, ClipboardList, Star, BarChart3, Crown, Settings, ChevronRight, FileText, ListChecks } from 'lucide-vue-next'
-import { teacherApi, type TeacherMembershipStatusDTO, type TeacherProfileDTO } from '../api/teacher'
+import { Edit3, ClipboardList, Star, BarChart3, Crown, Settings, ChevronRight, FileText, ListChecks, Bell } from 'lucide-vue-next'
+import { teacherApi, type DashboardSummaryDTO, type TeacherInviteSummaryDTO, type TeacherMembershipStatusDTO, type TeacherProfileDTO } from '../api/teacher'
 
 interface MenuItem {
   title: string
@@ -16,12 +16,23 @@ const router = useRouter()
 
 const profile = ref<TeacherProfileDTO | null>(null)
 const membership = ref<TeacherMembershipStatusDTO | null>(null)
-const dashboardSummary = ref({ newMatchCount: 0, unlockedMatchCount: 0, processingRequestCount: 0, remainingUnlock: 0 })
+const summary = ref<DashboardSummaryDTO>({
+  newMatchCount: 0,
+  unlockedMatchCount: 0,
+  processingRequestCount: 0,
+  remainingUnlock: 0,
+  integrityScore: 80,
+  totalReviewCount: 0,
+  totalUnlockCount: 0,
+  totalViewCount: 0
+})
+const invite = ref<TeacherInviteSummaryDTO>({ inviteCode: '', totalInvited: 0, verifiedInvited: 0, extraMatchQuota: 0 })
 const loading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
 const menuItems: MenuItem[] = [
   { title: '编辑资料', icon: Edit3, path: '/teacher-center/edit' },
+  { title: '通知中心', icon: Bell, path: '/teacher-center/notifications' },
   { title: '收到的请求', icon: ClipboardList, path: '/teacher-center/requests' },
   { title: '我的评价', icon: Star, path: '/teacher-center/reviews' },
   { title: '数据中心', icon: BarChart3, path: '/teacher-center/analytics' },
@@ -37,18 +48,28 @@ const rankName = computed(() => membership.value?.planName || '普通老师')
 const loadData = async () => {
   loading.value = true
   try {
-    const [profileData, membershipData, summary] = await Promise.all([
+    const [profileData, membershipData, summaryData] = await Promise.all([
       teacherApi.getProfile(),
       teacherApi.getMembershipStatus(),
       teacherApi.getDashboardSummary()
     ])
     profile.value = profileData
     membership.value = membershipData
-    dashboardSummary.value = summary
+    summary.value = summaryData
+    invite.value = await teacherApi.getInviteSummary()
   } catch (error) {
     console.error('Failed to load teacher center data:', error)
   } finally {
     loading.value = false
+  }
+}
+
+const createInviteCode = async () => {
+  try {
+    const result = await teacherApi.createInviteCode()
+    invite.value.inviteCode = String(result.inviteCode || '')
+  } catch (error) {
+    console.error('Failed to create invite code:', error)
   }
 }
 
@@ -98,7 +119,7 @@ onMounted(loadData)
           <div class="profile-meta">
             <h2>{{ profile?.teacherName || (loading ? '加载中...' : '老师') }}</h2>
             <p>{{ profile?.city || '所在城市未设置' }}</p>
-            <p class="sub">诚信评分：4.9</p>
+            <p class="sub">诚信评分：{{ summary.integrityScore }}</p>
           </div>
           <button class="btn-edit" @click="navigateTo('/teacher-center/edit')">编辑</button>
         </div>
@@ -110,10 +131,11 @@ onMounted(loadData)
           <div class="membership-expire">到期：{{ membership?.expireAt || '未开通' }}</div>
         </div>
         <div class="membership-benefits">
-          <div>本周优先配额：{{ membership?.weeklyPriorityQuota ?? 0 }} 次</div>
-          <div>剩余解锁：{{ membership?.remainingUnlock ?? 0 }} 次</div>
-          <div>今日新推荐：{{ dashboardSummary.newMatchCount }} 条</div>
-          <div>处理中请求：{{ dashboardSummary.processingRequestCount }} 条</div>
+          <div>剩余解锁：{{ summary.remainingUnlock }} 次</div>
+          <div>今日新推荐：{{ summary.newMatchCount }} 条</div>
+          <div>处理中请求：{{ summary.processingRequestCount }} 条</div>
+          <div>累计评价：{{ summary.totalReviewCount }} 条</div>
+          <div>累计解锁：{{ summary.totalUnlockCount }} 次</div>
         </div>
         <button class="btn-membership" @click="navigateTo('/teacher-center/vip')">提升曝光</button>
       </div>
@@ -132,15 +154,27 @@ onMounted(loadData)
           </li>
         </ul>
       </div>
+
+      <div class="teacher-card menu-card invite-card">
+        <h3>邀请奖励</h3>
+        <p class="invite-text">邀请1位新老师完成审核，可获得1次额外匹配机会。</p>
+        <div class="invite-row">
+          <span class="invite-code">{{ invite.inviteCode || '暂无邀请码' }}</span>
+          <button class="btn-edit" @click="createInviteCode">生成邀请码</button>
+        </div>
+        <p class="invite-meta">已邀请 {{ invite.totalInvited }} 人，已完成审核 {{ invite.verifiedInvited }} 人，额外配额 {{ invite.extraMatchQuota }}</p>
+      </div>
     </aside>
 
-    <main class="teacher-main">
-      <router-view v-slot="{ Component }">
-        <transition name="fade" mode="out-in">
-          <component :is="Component" />
-        </transition>
-      </router-view>
-    </main>
+    <div class="teacher-content-area">
+      <main class="teacher-main">
+        <router-view v-slot="{ Component }">
+          <transition name="fade" mode="out-in">
+            <component :is="Component" />
+          </transition>
+        </router-view>
+      </main>
+    </div>
   </div>
 </template>
 
@@ -148,14 +182,16 @@ onMounted(loadData)
 .teacher-center-layout {
   display: flex;
   gap: 24px;
-  max-width: 1200px;
+  width: 100%;
+  max-width: 1560px;
   margin: 0 auto;
   padding: 24px;
   align-items: flex-start;
+  box-sizing: border-box;
 }
 
 .teacher-sidebar {
-  width: 320px;
+  width: 300px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -163,8 +199,16 @@ onMounted(loadData)
 }
 
 .teacher-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.teacher-content-area {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
 .teacher-card {
@@ -291,6 +335,39 @@ onMounted(loadData)
   font-size: 18px;
 }
 
+.invite-text {
+  margin: 0;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.invite-row {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.invite-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #111827;
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #f3f4f6;
+}
+
+.invite-meta {
+  margin: 10px 0 0;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.invite-card {
+  margin-top: 0;
+}
+
 .menu-item {
   width: 100%;
   border: none;
@@ -324,35 +401,113 @@ onMounted(loadData)
   gap: 10px;
 }
 
-.menu-icon,
-.menu-arrow {
+.menu-icon {
   width: 18px;
   height: 18px;
 }
 
+.menu-arrow {
+  width: 16px;
+  height: 16px;
+  color: #9ca3af;
+}
+
+ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition: opacity 0.2s ease;
 }
 
-.fade-enter-from {
-  opacity: 0;
-  transform: translateY(8px);
-}
-
+.fade-enter-from,
 .fade-leave-to {
   opacity: 0;
-  transform: translateY(-8px);
 }
 
-@media (max-width: 992px) {
+@media (max-width: 1000px) {
   .teacher-center-layout {
     flex-direction: column;
+    gap: 14px;
+    padding: 12px 12px 92px;
   }
 
   .teacher-sidebar {
     width: 100%;
+    order: 2;
+    gap: 14px;
+  }
+
+  .teacher-content-area {
+    order: 1;
+    width: 100%;
+  }
+
+  .teacher-card,
+  .membership-card {
+    border-radius: 14px;
+    padding: 16px;
+  }
+
+  .profile-row {
+    gap: 12px;
+  }
+
+  .profile-meta h2 {
+    font-size: 20px;
+  }
+
+  .membership-title {
+    font-size: 18px;
+  }
+
+  .membership-benefits {
+    font-size: 13px;
+  }
+
+  .menu-card h3 {
+    font-size: 17px;
+  }
+
+  .menu-item {
+    min-height: 46px;
+    height: auto;
+    padding: 10px 12px;
   }
 }
-</style>
 
+@media (max-width: 560px) {
+  .teacher-center-layout {
+    padding: 10px 10px 92px;
+  }
+
+  .avatar {
+    width: 60px;
+    height: 60px;
+  }
+
+  .profile-meta h2 {
+    font-size: 18px;
+  }
+
+  .profile-meta p {
+    font-size: 12px;
+  }
+
+  .btn-edit {
+    padding: 7px 12px;
+    font-size: 13px;
+  }
+
+  .invite-row {
+    flex-wrap: wrap;
+  }
+}
+
+</style>
