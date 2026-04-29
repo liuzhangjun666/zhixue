@@ -29,6 +29,26 @@ const tryParseJson = (text: string) => {
   }
 }
 
+const clearAuthStorage = () => {
+  if (typeof window === 'undefined') return
+  window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
+  window.localStorage.removeItem(AUTH_USER_STORAGE_KEY)
+}
+
+const redirectForUnauthorized = (roleHint = '') => {
+  if (typeof window === 'undefined') return
+
+  const path = window.location.pathname || '/'
+  const authPages = new Set(['/login', '/register', '/teacher-auth'])
+  if (authPages.has(path)) return
+
+  const fallbackTeacherPath = path.startsWith('/teacher') ? '/teacher-auth' : '/login'
+  const target = roleHint === 'teacher' ? '/teacher-auth' : fallbackTeacherPath
+  if (path !== target) {
+    window.location.replace(target)
+  }
+}
+
 export const unwrapData = <T>(payload: unknown, fallback: T): T => {
   if (!payload || typeof payload !== 'object') return fallback
   if ('data' in payload) return (payload as { data: T }).data ?? fallback
@@ -65,6 +85,17 @@ export const request = async <T = unknown>(path: string, options: RequestOptions
   const payload = tryParseJson(text)
 
   if (!response.ok) {
+    if (response.status === 401) {
+      let roleHint = ''
+      if (typeof window !== 'undefined') {
+        try {
+          const raw = window.localStorage.getItem(AUTH_USER_STORAGE_KEY)
+          if (raw) roleHint = String(JSON.parse(raw)?.role || '')
+        } catch {}
+      }
+      clearAuthStorage()
+      redirectForUnauthorized(roleHint)
+    }
     const message =
       (payload && typeof payload === 'object' && 'message' in payload && String((payload as { message: unknown }).message)) ||
       `请求失败 (${response.status})`

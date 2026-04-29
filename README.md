@@ -25,8 +25,10 @@
 - `DB_USER`：MySQL 用户（默认 `root`）
 - `DB_PASSWORD`：MySQL 密码（默认 `123456`）
 - `DB_NAME`：数据库名（默认 `zhixue`）
-- `AUTH_TOKEN_SECRET`：Token 签名密钥（默认 `zhixue-dev-secret-change-me`）
+- `AUTH_TOKEN_SECRET`：Token 签名密钥（开发默认 `zhixue-dev-secret-change-me`）
 - `AUTH_TOKEN_EXPIRES_IN_SECONDS`：Token 有效期秒数（默认 `604800`，即 7 天）
+
+> 生产环境要求：必须显式配置 `AUTH_TOKEN_SECRET`，且不能使用开发默认值；否则后端会拒绝启动。
 
 ## 本地启动流程
 
@@ -85,6 +87,22 @@ npm run build
 
 5. 后端通过 `authRequired` 中间件解析 token，注入 `req.user`。
 
+6. Token 过期策略：
+- 令牌包含 `exp`（Unix 秒级时间戳）；
+- 登录/注册响应同时返回：
+  - `tokenExpiresIn`（秒）
+  - `tokenExpiresAt`（ISO 时间）
+
+7. 统一鉴权错误格式：
+
+```json
+{ "code": 401, "message": "Unauthorized", "data": null }
+```
+
+```json
+{ "code": 403, "message": "Forbidden", "data": null }
+```
+
 ## 常用 API 简表
 
 | Method | Path | 说明 | 需要 Token |
@@ -103,6 +121,7 @@ npm run build
 | GET | `/api/membership/plans` | 会员套餐列表 | 否 |
 
 详细 API 示例见：[`docs/API.md`](./docs/API.md)
+手工验收步骤见：[`docs/QA.md`](./docs/QA.md)
 
 ## 最小回归校验
 
@@ -132,4 +151,20 @@ npm run smoke:auth
 ```bash
 $env:API_BASE_URL='http://localhost:8001'
 npm run smoke:auth
+```
+
+### 核心权限回归（smoke:core）
+
+脚本位置：`server/scripts/smoke-core.js`
+
+覆盖：
+- parent/teacher 注册登录与 `me/profile`
+- parent 创建 request、获取列表、获取详情
+- 未登录访问受保护接口返回 401
+- 角色越权访问返回 403
+
+运行命令：
+
+```bash
+npm run smoke:core
 ```
