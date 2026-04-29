@@ -92,6 +92,21 @@ const routes = [
         component: () => import('../views/teacher/Analytics.vue')
       },
       {
+        path: 'questionnaire',
+        name: 'TeacherQuestionnaire',
+        component: () => import('../views/teacher/Questionnaire.vue')
+      },
+      {
+        path: 'match-pool',
+        name: 'TeacherMatchPool',
+        component: () => import('../views/teacher/MatchPool.vue')
+      },
+      {
+        path: 'unlock-records',
+        name: 'TeacherUnlockRecords',
+        component: () => import('../views/teacher/UnlockRecords.vue')
+      },
+      {
         path: 'vip',
         name: 'TeacherVip',
         component: () => import('../views/teacher/VipCenter.vue')

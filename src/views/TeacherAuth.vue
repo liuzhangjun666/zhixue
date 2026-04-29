@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import GlassCard from '../components/GlassCard.vue'
+import { teacherApi } from '../api/teacher'
 
 const router = useRouter()
 const currentStep = ref(1)
@@ -9,17 +10,53 @@ const currentStep = ref(1)
 const phone = ref('')
 const code = ref('')
 const password = ref('')
+const city = ref('上海')
 
 const nickname = ref('')
 const gender = ref('')
+const certUrl = ref('')
+const feedback = ref('')
 
-const nextStep = () => {
+const nextStep = async () => {
+  feedback.value = ''
+  if (currentStep.value === 1) {
+    try {
+      await teacherApi.register({
+        phone: phone.value,
+        password: password.value,
+        code: code.value,
+        nickname: nickname.value || '新老师',
+        city: city.value
+      })
+    } catch (error) {
+      try {
+        await teacherApi.login(phone.value, password.value)
+      } catch (e) {
+        feedback.value = e?.message || error?.message || '老师注册失败'
+        return
+      }
+    }
+  }
+
+  if (currentStep.value === 3 && certUrl.value.trim()) {
+    try {
+      await teacherApi.submitVerification('teacher_license', certUrl.value.trim())
+    } catch (error) {
+      feedback.value = error?.message || '认证材料提交失败'
+      return
+    }
+  }
+
   if (currentStep.value < 4) {
     currentStep.value++
   }
 }
 
-const finishRegister = () => {
+const finishRegister = async () => {
+  if (!teacherApi.getToken()) {
+    feedback.value = '登录状态失效，请重新登录'
+    return
+  }
   router.push('/teacher-center')
 }
 </script>
@@ -84,6 +121,12 @@ const finishRegister = () => {
               </div>
             </div>
 
+            <div class="input-group">
+              <div class="input-wrapper">
+                <input type="text" v-model="city" class="input-field" placeholder="所在城市" required>
+              </div>
+            </div>
+
             <button type="submit" class="btn btn-teacher w-100 mt-4">下一步</button>
           </form>
         </div>
@@ -121,7 +164,7 @@ const finishRegister = () => {
             <div class="cert-icon">📄</div>
             <p class="cert-title">上传教师资格证或从业证明</p>
             <p class="cert-desc">选填，提交后可提升信任度和曝光权重</p>
-            <button class="btn btn-ghost btn-teacher-ghost mt-3">选择文件</button>
+            <input v-model="certUrl" class="input-field mt-3" type="text" placeholder="粘贴证书图片/文件地址（可选）">
             <p class="upload-hint mt-2">支持 JPG、PNG、PDF，不超过 5MB</p>
           </div>
 
@@ -139,6 +182,7 @@ const finishRegister = () => {
         <div v-if="currentStep === 1" class="text-center mt-4 text-sub">
           已有老师账号？<router-link to="/login" class="text-teacher">立即登录</router-link>
         </div>
+        <p v-if="feedback" class="feedback">{{ feedback }}</p>
       </GlassCard>
     </div>
   </div>
@@ -321,4 +365,5 @@ const finishRegister = () => {
 .border-0 { border: none !important; }
 
 .success-icon { font-size: 64px; }
+.feedback { margin-top: 12px; color: #b91c1c; font-size: 13px; text-align: center; }
 </style>
