@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Edit3, ClipboardList, Star, Crown, Settings, ChevronRight } from 'lucide-vue-next'
 import { parentApi, type ParentProfileDTO } from '../api/parent'
@@ -9,6 +9,7 @@ const route = useRoute()
 const showVipModal = ref<boolean>(false)
 
 const userProfile = ref<ParentProfileDTO | null>(null)
+const requestCount = ref<number>(0)
 const fileInput = ref<HTMLInputElement | null>(null)
 
 onMounted(async () => {
@@ -16,6 +17,12 @@ onMounted(async () => {
     userProfile.value = await parentApi.getProfile()
   } catch(e) {
     console.error('Failed to load profile', e)
+  }
+  try {
+    const requests = await parentApi.getRequests()
+    requestCount.value = Array.isArray(requests) ? requests.length : 0
+  } catch (e) {
+    console.error('Failed to load request count', e)
   }
 })
 
@@ -53,9 +60,9 @@ interface MenuItem {
   textClass?: string
 }
 
-const menuItems: MenuItem[] = [
+const menuItems = computed<MenuItem[]>(() => [
   { title: '编辑资料', icon: Edit3, path: '/parent/edit' },
-  { title: '我的请求', icon: ClipboardList, path: '/parent/requests', badge: 2 },
+  { title: '我的请求', icon: ClipboardList, path: '/parent/requests', badge: requestCount.value > 0 ? requestCount.value : undefined },
   { title: '我的评价', icon: Star, path: '/parent/reviews', suffix: '共 12 条' },
   {
     title: '会员中心',
@@ -65,7 +72,7 @@ const menuItems: MenuItem[] = [
     textClass: 'text-primary fw-bold'
   },
   { title: '账户设置', icon: Settings, path: '/parent/settings' }
-]
+])
 
 const handleNavigate = (path: string) => {
   if (!path) return

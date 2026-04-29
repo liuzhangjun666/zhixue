@@ -40,6 +40,10 @@ const totalByStar = (star: number) => reviews.value.filter((item) => item.rating
 
 const starText = (rating: number) => '★'.repeat(rating) + '☆'.repeat(5 - rating)
 
+const toggleRatingFilter = (star: number) => {
+  filter.rating = filter.rating === star ? 0 : star
+}
+
 const submitReply = async (id: number) => {
   const draft = (replyDraft.value[id] || '').trim()
   if (!draft) return
@@ -94,7 +98,13 @@ onMounted(loadReviews)
 
     <article class="summary-card" v-else>
       <div class="summary-row">
-        <div class="summary-item" v-for="star in [5, 4, 3, 2, 1]" :key="star">
+        <div
+          class="summary-item"
+          :class="{ active: filter.rating === star }"
+          v-for="star in [5, 4, 3, 2, 1]"
+          :key="star"
+          @click="toggleRatingFilter(star)"
+        >
           <strong>{{ star }} 星</strong>
           <span>{{ totalByStar(star) }} 条</span>
         </div>
@@ -237,10 +247,27 @@ p {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .summary-item strong {
   color: #111827;
+}
+
+.summary-item:hover {
+  border-color: #c7d2fe;
+  background: #f8faff;
+}
+
+.summary-item.active {
+  border-color: #5e5ce6;
+  background: rgba(94, 92, 230, 0.1);
+}
+
+.summary-item.active strong,
+.summary-item.active span {
+  color: #4338ca;
 }
 
 .filter-card {

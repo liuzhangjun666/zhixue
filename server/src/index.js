@@ -10,7 +10,10 @@ const app = express()
 const httpServer = createServer(app)
 
 const PORT = Number(process.env.PORT || 8000)
-const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173')
+const ALLOWED_ORIGINS = (
+  process.env.CORS_ORIGINS ||
+  'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174'
+)
   .split(',')
   .map((item) => item.trim())
   .filter(Boolean)

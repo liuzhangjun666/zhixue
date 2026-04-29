@@ -32,11 +32,9 @@
     </div>
 
     <!-- 主面板：聊天区 -->
-    <!-- 主面板：聊天区 -->
     <div class="chat-main">
       <template v-if="currentConversation">
         <div class="chat-header">
-          <h3>与 {{ currentConversation.contactName }} 的对话</h3>
           <h3>与 {{ currentConversation.contactName }} 的对话</h3>
         </div>
 
@@ -62,14 +60,12 @@
           <button class="send-btn" @click="sendMessage" :disabled="!newMessage.trim()">
             <SendIcon class="icon" />
             发送
-            发送
           </button>
         </div>
       </template>
 
       <div v-else class="empty-chat">
         <MessageSquareIcon class="large-icon" />
-        <p>选择一个联系人开始聊天</p>
         <p>选择一个联系人开始聊天</p>
       </div>
     </div>

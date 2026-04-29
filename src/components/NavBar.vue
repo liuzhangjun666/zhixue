@@ -10,7 +10,10 @@ const router = useRouter()
 const route = useRoute()
 const currentPath = computed(() => route.path)
 
-const isLoggedIn = computed(() => !['/login', '/register', '/teacher-auth'].includes(route.path))
+const isLoggedIn = computed(() => {
+  if (typeof window === 'undefined') return false
+  return Boolean(window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY))
+})
 const userRole = computed(() => {
   if (typeof window !== 'undefined') {
     try {
@@ -36,12 +39,48 @@ const systemUnreadCount = computed(() => systemNotifications.value.filter((n) =>
 
 let pollInterval: any = null
 
+const getSystemReadStorageKey = () => {
+  if (typeof window === 'undefined') return 'system_notice_read_guest'
+  let userKey = 'guest'
+  try {
+    const raw = window.localStorage.getItem(AUTH_USER_STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed?.id) userKey = String(parsed.id)
+    }
+  } catch {}
+  return `system_notice_read_${userKey}`
+}
+
+const restoreSystemNotificationRead = () => {
+  if (typeof window === 'undefined') return
+  try {
+    const raw = window.localStorage.getItem(getSystemReadStorageKey())
+    if (!raw) return
+    const readIds = JSON.parse(raw)
+    const readSet = new Set(Array.isArray(readIds) ? readIds.map((id: unknown) => Number(id)) : [])
+    systemNotifications.value = systemNotifications.value.map((item) => ({
+      ...item,
+      read: readSet.has(item.id)
+    }))
+  } catch {
+    // ignore invalid local cache
+  }
+}
+
+const persistSystemNotificationRead = () => {
+  if (typeof window === 'undefined') return
+  const readIds = systemNotifications.value.filter((item) => item.read).map((item) => item.id)
+  window.localStorage.setItem(getSystemReadStorageKey(), JSON.stringify(readIds))
+}
+
 const toggleSystemNotifications = () => {
   showNotifications.value = !showNotifications.value
   if (showNotifications.value) {
     systemNotifications.value.forEach((n) => {
       n.read = true
     })
+    persistSystemNotificationRead()
   }
 }
 
@@ -70,17 +109,16 @@ const handleLogout = () => {
 const fetchUnreadCount = async () => {
   if (!isLoggedIn.value) return
   try {
-    const res = await fetch(`http://localhost:8000/api/messages/unread-count?userId=${userId}`)
-    const { data } = await res.json()
-    if (data) {
-      unreadCount.value = data.count
-    }
+    const payload = await request('/api/messages/unread-count')
+    const data = unwrapData(payload, { count: 0 })
+    unreadCount.value = Number(data.count || 0)
   } catch (_) {
     // ignore transient network errors during polling
   }
 }
 
 onMounted(() => {
+  restoreSystemNotificationRead()
   fetchUnreadCount()
   pollInterval = setInterval(fetchUnreadCount, 3000)
   document.addEventListener('click', closeNotifications)
@@ -105,7 +143,7 @@ onUnmounted(() => {
           <li><router-link to="#" class="disabled">发现</router-link></li>
           <li>
             <router-link
-              :to="{ path: '/messages', query: { userId: userRole === 'teacher' ? '2' : '1' } }"
+              to="/messages"
               class="nav-link-with-badge"
               :class="{ active: currentPath.includes('/messages') }"
             >
