@@ -74,13 +74,14 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { User as UserIcon, Send as SendIcon, MessageSquare as MessageSquareIcon } from 'lucide-vue-next'
 import { io } from 'socket.io-client'
 import { API_BASE_URL, AUTH_TOKEN_STORAGE_KEY, request, unwrapData } from '../api/http'
 import { getCurrentUser, getStoredUser } from '../api/auth'
 
 const router = useRouter()
+const route = useRoute()
 const currentUserId = ref(Number(getStoredUser()?.id || 0))
 
 const conversations = ref([])
@@ -88,6 +89,7 @@ const currentConversation = ref(null)
 const currentMessages = ref([])
 const newMessage = ref('')
 const messagesListRef = ref(null)
+const initialConversationId = ref(Number(route.query.conversationId || 0))
 const WS_BASE_URL = API_BASE_URL ? new URL(API_BASE_URL, window.location.origin).origin : window.location.origin
 
 let socket = null
@@ -109,6 +111,13 @@ const loadConversations = async () => {
   try {
     const payload = await request('/api/messages/conversations')
     conversations.value = unwrapData(payload, [])
+    if (initialConversationId.value && !currentConversation.value) {
+      const target = conversations.value.find((item) => Number(item.id) === initialConversationId.value)
+      if (target) {
+        initialConversationId.value = 0
+        await selectConversation(target)
+      }
+    }
   } catch (err) {
     console.error('Failed to load conversations', err)
   }

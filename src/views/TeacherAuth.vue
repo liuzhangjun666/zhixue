@@ -1,10 +1,13 @@
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import GlassCard from '../components/GlassCard.vue'
 import { teacherApi } from '../api/teacher'
+import { teacherLogin, teacherRegister, setAuthSession } from '../api/auth'
+import { AUTH_TOKEN_STORAGE_KEY } from '../api/http'
 
 const router = useRouter()
+const route = useRoute()
 const currentStep = ref(1)
 const isLoginMode = ref(false)
 
@@ -17,21 +20,66 @@ const nickname = ref('')
 const gender = ref('')
 const certUrl = ref('')
 const feedback = ref('')
+const errorText = ref('')
+const loading = ref(false)
+const subject = ref('')
+const exp = ref('')
+
+const targetPath = () => (typeof route.query.redirect === 'string' ? route.query.redirect : '/teacher-center')
+
+const switchToLogin = () => {
+  isLoginMode.value = true
+  currentStep.value = 1
+  feedback.value = ''
+  errorText.value = ''
+}
+
+const switchToRegister = () => {
+  isLoginMode.value = false
+  currentStep.value = 1
+  feedback.value = ''
+  errorText.value = ''
+}
+
+const handleTeacherLogin = async () => {
+  loading.value = true
+  feedback.value = ''
+  errorText.value = ''
+  try {
+    const data = await teacherLogin({ phone: phone.value.trim(), password: password.value })
+    if (!data?.token || !data?.user) throw new Error('登录返回数据不完整')
+    setAuthSession(data.token, data.user)
+    teacherApi.setToken(data.token)
+    router.push(targetPath())
+  } catch (error) {
+    errorText.value = error?.message || '老师登录失败'
+  } finally {
+    loading.value = false
+  }
+}
 
 const nextStep = async () => {
   feedback.value = ''
   if (currentStep.value === 1) {
     try {
-      await teacherApi.register({
+      const data = await teacherRegister({
         phone: phone.value,
         password: password.value,
-        code: code.value,
         nickname: nickname.value || '新老师',
-        city: city.value
+        subject: subject.value,
+        experience: exp.value
       })
+      if (data?.token && data?.user) {
+        setAuthSession(data.token, data.user)
+        teacherApi.setToken(data.token)
+      }
     } catch (error) {
       try {
-        await teacherApi.login(phone.value, password.value)
+        const data = await teacherLogin({ phone: phone.value.trim(), password: password.value })
+        if (data?.token && data?.user) {
+          setAuthSession(data.token, data.user)
+          teacherApi.setToken(data.token)
+        }
       } catch (e) {
         feedback.value = e?.message || error?.message || '老师注册失败'
         return
@@ -54,11 +102,12 @@ const nextStep = async () => {
 }
 
 const finishRegister = async () => {
-  if (!teacherApi.getToken()) {
+  const token = typeof window !== 'undefined' ? window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) : ''
+  if (!token) {
     feedback.value = '登录状态失效，请重新登录'
     return
   }
-  router.push('/teacher-center')
+  router.push(targetPath())
 }
 </script>
 

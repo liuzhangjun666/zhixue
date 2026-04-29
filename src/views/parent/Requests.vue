@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from 'lucide-vue-next'
 import { parentApi, type ParentRequestDTO, type RequestStatus } from '../../api/parent'
 import Modal from '../../components/Modal.vue'
 
 const router = useRouter()
+const route = useRoute()
 
 const tabs = [
   { key: 'all', label: '全部' },
@@ -29,7 +30,9 @@ const newReq = ref({
   subject: '',
   grade: '',
   budget: '',
-  schedule: ''
+  schedule: '',
+  description: '',
+  teacherName: ''
 })
 
 const filteredRequests = computed(() => {
@@ -111,7 +114,7 @@ const submitNewRequest = async () => {
   try {
     await parentApi.createRequest(newReq.value)
     showCreateModal.value = false
-    newReq.value = { title: '', subject: '', grade: '', budget: '', schedule: '' }
+    newReq.value = { title: '', subject: '', grade: '', budget: '', schedule: '', description: '', teacherName: '' }
     loadRequests()
   } catch (error) {
     feedback.value = (error as Error).message || '新建请求失败'
@@ -120,7 +123,23 @@ const submitNewRequest = async () => {
   }
 }
 
-onMounted(loadRequests)
+onMounted(() => {
+  if (route.query.from === 'discover') {
+    const teacherName = typeof route.query.teacherName === 'string' ? route.query.teacherName : ''
+    const subject = typeof route.query.subject === 'string' ? route.query.subject : ''
+    newReq.value = {
+      title: teacherName ? `预约${teacherName}的辅导` : '',
+      subject,
+      grade: '',
+      budget: '',
+      schedule: '',
+      description: teacherName ? `来自发现页，意向老师：${teacherName}` : '',
+      teacherName
+    }
+    showCreateModal.value = true
+  }
+  loadRequests()
+})
 </script>
 
 <template>
@@ -214,6 +233,10 @@ onMounted(loadRequests)
         <label class="field field-full">
           <span>期望时间</span>
           <input v-model="newReq.schedule" type="text" placeholder="例如：每周六下午 2:00-4:00" />
+        </label>
+        <label class="field field-full">
+          <span>补充说明</span>
+          <input v-model="newReq.description" type="text" placeholder="孩子情况、目标或意向老师" />
         </label>
       </div>
       <template #footer>

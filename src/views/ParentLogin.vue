@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { parentLogin, setAuthSession } from '../api/auth'
 
 const router = useRouter()
+const route = useRoute()
 const phone = ref<string>('')
 const password = ref<string>('')
 const showPassword = ref<boolean>(false)
@@ -113,7 +114,8 @@ const handleLogin = async () => {
       throw new Error('登录返回数据不完整')
     }
     setAuthSession(data.token, data.user)
-    router.push('/parent-center')
+    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/parent-center'
+    router.push(redirect)
   } catch (error) {
     errorText.value = (error as Error).message || '登录失败，请稍后重试'
   } finally {

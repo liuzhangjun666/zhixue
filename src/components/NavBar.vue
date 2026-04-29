@@ -140,7 +140,7 @@ onUnmounted(() => {
         </div>
         <ul class="nav-menu">
           <li><router-link to="/" :class="{ active: currentPath === '/' }">首页</router-link></li>
-          <li><router-link to="#" class="disabled">发现</router-link></li>
+          <li><router-link to="/discover" :class="{ active: currentPath.startsWith('/discover') }">发现</router-link></li>
           <li>
             <router-link
               to="/messages"
@@ -292,11 +292,6 @@ onUnmounted(() => {
   height: 2px;
   background: #1D1D1F;
   border-radius: 2px 2px 0 0;
-}
-
-.nav-menu a.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .nav-right {

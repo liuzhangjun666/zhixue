@@ -1,10 +1,11 @@
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import GlassCard from '../components/GlassCard.vue'
 import { parentRegister, setAuthSession } from '../api/auth'
 
 const router = useRouter()
+const route = useRoute()
 const currentStep = ref(1)
 
 // Form data
@@ -50,7 +51,8 @@ const finishRegister = async () => {
     })
     if (!data?.token || !data?.user) throw new Error('注册返回数据不完整')
     setAuthSession(data.token, data.user)
-    router.push('/parent-center')
+    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/parent-center'
+    router.push(redirect)
   } catch (error) {
     errorText.value = (error && error.message) || '注册失败，请稍后重试'
   } finally {

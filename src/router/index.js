@@ -24,6 +24,16 @@ const routes = [
     component: () => import('../views/TeacherAuth.vue')
   },
   {
+    path: '/discover',
+    name: 'Discover',
+    component: () => import('../views/Discover.vue')
+  },
+  {
+    path: '/discover/teachers/:teacherId',
+    name: 'TeacherDetail',
+    component: () => import('../views/TeacherDetail.vue')
+  },
+  {
     path: '/messages',
     name: 'Messages',
     component: () => import('../views/Messages.vue')
@@ -152,7 +162,10 @@ router.beforeEach((to) => {
   const needsAuth = inParentArea || inTeacherArea || inSharedProtectedArea
 
   if (!token && needsAuth) {
-    return inTeacherArea ? '/teacher-auth' : '/login'
+    return {
+      path: inTeacherArea ? '/teacher-auth' : '/login',
+      query: { redirect: to.fullPath }
+    }
   }
 
   if (token && authPages.has(to.path)) {

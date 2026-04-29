@@ -9,7 +9,6 @@ CREATE TABLE IF NOT EXISTS users (
   nickname VARCHAR(50) NOT NULL DEFAULT '',
   phone VARCHAR(20) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
-  avatar TEXT,
   wechat VARCHAR(50) NOT NULL DEFAULT '',
   city VARCHAR(50) DEFAULT '',
   bio TEXT,
@@ -39,6 +38,7 @@ CREATE TABLE IF NOT EXISTS requests (
   grade VARCHAR(20) DEFAULT '',
   budget VARCHAR(50) DEFAULT '',
   schedule VARCHAR(100) DEFAULT '',
+  description TEXT,
   status ENUM('pending','matching','scheduled','completed','cancelled') DEFAULT 'pending',
   teacher_name VARCHAR(50) DEFAULT '',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -103,11 +103,22 @@ CREATE TABLE IF NOT EXISTS teacher_profiles (
   student_type VARCHAR(100) NOT NULL DEFAULT '',
   areas JSON,
   intro TEXT,
+  hourly_price_min DECIMAL(10,2) DEFAULT NULL,
+  hourly_price_max DECIMAL(10,2) DEFAULT NULL,
+  teaching_mode ENUM('online','offline','both') NOT NULL DEFAULT 'both',
+  available_time_text VARCHAR(255) NOT NULL DEFAULT '',
+  rating_avg DECIMAL(3,2) NOT NULL DEFAULT 0,
+  rating_count INT NOT NULL DEFAULT 0,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
   verified TINYINT(1) NOT NULL DEFAULT 0,
   verify_status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
   verify_remark VARCHAR(255) NOT NULL DEFAULT '',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_teacher_profiles_city(city),
+  INDEX idx_teacher_profiles_price(hourly_price_min, hourly_price_max),
+  INDEX idx_teacher_profiles_rating(rating_avg),
+  INDEX idx_teacher_profiles_active(is_active),
   CONSTRAINT fk_teacher_profiles_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
@@ -199,8 +210,37 @@ CREATE TABLE IF NOT EXISTS messages (
 -- 插入演示用户（密码 123456 的 bcrypt 哈希）
 INSERT INTO users (id, role, nickname, phone, password_hash, city, bio, preferred_grade, preferred_subjects) VALUES
 (1, 'parent', '李明爸爸', '13800138000', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '上海', '关注孩子学习习惯培养，偏好长期稳定的老师合作。', '小学', '["数学","英语"]'),
-(2, 'teacher', '张老师', '13900139000', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '上海', '五年教龄，专注小学数学和英语提分。', '', '["数学","英语"]')
+(2, 'teacher', '张老师', '13900139000', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '上海', '五年教龄，专注小学数学和英语提分。', '', '["数学","英语"]'),
+(3, 'teacher', '陈老师', '13900139001', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '上海', '英语启蒙与自然拼读课程，适合低年级孩子。', '', '["英语"]'),
+(4, 'teacher', '周老师', '13900139002', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '杭州', '语文阅读理解、作文表达和学习习惯培养。', '', '["语文"]')
 ON DUPLICATE KEY UPDATE nickname=VALUES(nickname);
+
+-- 教师发现页画像种子
+INSERT INTO teacher_profiles
+  (user_id, real_name, city, district, subjects, grades, experience_years, teaching_style, student_type, areas, intro,
+   hourly_price_min, hourly_price_max, teaching_mode, available_time_text, rating_avg, rating_count, is_active, verified, verify_status)
+VALUES
+  (2, '张老师', '上海', '浦东新区', '["数学","英语"]', '["三年级","四年级","五年级"]', 5, '结构化讲解+错题复盘', '基础巩固/提分', '["浦东新区","线上"]',
+   '五年教龄，专注小学数学和英语提分，擅长把薄弱知识点拆成可执行练习。', 180, 260, 'both', '工作日晚间、周末上午', 4.8, 36, TRUE, TRUE, 'approved'),
+  (3, '陈老师', '上海', '徐汇区', '["英语"]', '["一年级","二年级","三年级"]', 4, '自然拼读+口语互动', '英语启蒙', '["徐汇区","线上"]',
+   '英语启蒙与自然拼读课程，课堂互动强，适合低年级孩子建立开口信心。', 160, 220, 'both', '周二/周四晚间，周六下午', 4.9, 42, TRUE, TRUE, 'approved'),
+  (4, '周老师', '杭州', '西湖区', '["语文"]', '["三年级","四年级","五年级","六年级"]', 7, '阅读方法+表达训练', '阅读写作提升', '["西湖区","线上"]',
+   '语文阅读理解、作文表达和学习习惯培养，适合需要系统提升表达能力的学生。', 200, 300, 'online', '周末全天可约', 4.7, 28, TRUE, TRUE, 'approved')
+ON DUPLICATE KEY UPDATE
+  real_name=VALUES(real_name),
+  city=VALUES(city),
+  district=VALUES(district),
+  subjects=VALUES(subjects),
+  grades=VALUES(grades),
+  experience_years=VALUES(experience_years),
+  intro=VALUES(intro),
+  hourly_price_min=VALUES(hourly_price_min),
+  hourly_price_max=VALUES(hourly_price_max),
+  teaching_mode=VALUES(teaching_mode),
+  available_time_text=VALUES(available_time_text),
+  rating_avg=VALUES(rating_avg),
+  rating_count=VALUES(rating_count),
+  is_active=VALUES(is_active);
 
 -- 学生档案
 INSERT INTO children (id, parent_id, name, grade, target_subject) VALUES

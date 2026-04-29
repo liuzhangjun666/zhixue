@@ -150,6 +150,49 @@ const run = async () => {
   assertForbidden(parentAccessTeacher, '/api/teacher/profile with parent token')
   console.log('[ok] parent->teacher forbidden check')
 
+  const discoverList = await fetchJson('/api/discover/teachers?page=1&page_size=5')
+  assertOk(discoverList, '/api/discover/teachers')
+  const teacherFromDiscover = discoverList.payload?.data?.list?.[0]
+  const discoverTeacherId = Number(teacherFromDiscover?.teacherId || teacherFromDiscover?.id || 0)
+  if (!discoverTeacherId) throw new Error('discover teacher id missing')
+  console.log('[ok] discover anonymous list')
+
+  const discoverDetail = await fetchJson(`/api/discover/teachers/${discoverTeacherId}`)
+  assertOk(discoverDetail, '/api/discover/teachers/:teacherId')
+  console.log('[ok] discover teacher detail')
+
+  const contactWithoutToken = await fetchJson(`/api/discover/teachers/${discoverTeacherId}/contact`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  })
+  assertUnauthorized(contactWithoutToken, '/api/discover/teachers/:teacherId/contact without token')
+  console.log('[ok] discover contact unauthorized check')
+
+  const parentContact = await fetchJson(`/api/discover/teachers/${discoverTeacherId}/contact`, {
+    method: 'POST',
+    headers: authHeaders(parentToken)
+  })
+  assertOk(parentContact, '/api/discover/teachers/:teacherId/contact parent')
+  if (!Number(parentContact.payload?.data?.conversationId || 0)) throw new Error('conversationId missing after discover contact')
+  console.log('[ok] discover parent contact')
+
+  const parentContactAgain = await fetchJson(`/api/discover/teachers/${discoverTeacherId}/contact`, {
+    method: 'POST',
+    headers: authHeaders(parentToken)
+  })
+  assertOk(parentContactAgain, '/api/discover/teachers/:teacherId/contact parent repeat')
+  if (Number(parentContactAgain.payload?.data?.conversationId || 0) !== Number(parentContact.payload?.data?.conversationId || 0)) {
+    throw new Error('discover contact did not reuse existing conversation')
+  }
+  console.log('[ok] discover parent contact reuse')
+
+  const teacherContact = await fetchJson(`/api/discover/teachers/${discoverTeacherId}/contact`, {
+    method: 'POST',
+    headers: authHeaders(teacherToken)
+  })
+  assertForbidden(teacherContact, '/api/discover/teachers/:teacherId/contact teacher')
+  console.log('[ok] discover teacher contact forbidden check')
+
   console.log('[smoke-core] core flow passed')
 }
 
