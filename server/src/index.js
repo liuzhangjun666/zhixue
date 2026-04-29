@@ -1,6 +1,7 @@
-import express from 'express'
+﻿import express from 'express'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
+import { randomUUID } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import crypto from 'node:crypto'
 import pool from './db.js'
@@ -18,9 +19,9 @@ const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || DEFAULT_AUTH_TOKEN_SE
 const AUTH_TOKEN_EXPIRES_IN_SECONDS = Number(process.env.AUTH_TOKEN_EXPIRES_IN_SECONDS || 60 * 60 * 24 * 7)
 const IS_PRODUCTION = process.env.NODE_ENV === 'production'
 
-if (IS_PRODUCTION && (!process.env.AUTH_TOKEN_SECRET || AUTH_TOKEN_SECRET === DEFAULT_AUTH_TOKEN_SECRET)) {
-  throw new Error('AUTH_TOKEN_SECRET must be configured in production and must not use the default secret.')
-}
+const CURRENT_PARENT_USER_ID = 1
+const CURRENT_TEACHER_USER_ID = 2
+const teacherSessions = new Map()
 
 const io = new Server(httpServer, {
   cors: {
@@ -47,76 +48,28 @@ app.use((req, res, next) => {
   next()
 })
 
-const ok = (res, data, message = 'ok') => res.json({ code: 0, message, data })
-const fail = (res, status, message) => {
-  if (status === 401) return res.status(401).json({ code: 401, message: 'Unauthorized', data: null })
-  if (status === 403) return res.status(403).json({ code: 403, message: 'Forbidden', data: null })
-  return res.status(status).json({ code: status, message })
-}
-
-const toBase64Url = (input) =>
-  Buffer.from(input)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '')
-
-const fromBase64Url = (input) => {
-  const normalized = input.replace(/-/g, '+').replace(/_/g, '/')
-  const padding = normalized.length % 4 ? '='.repeat(4 - (normalized.length % 4)) : ''
-  return Buffer.from(normalized + padding, 'base64').toString('utf8')
-}
-
-const signTokenPayload = (payloadBase64) =>
-  toBase64Url(crypto.createHmac('sha256', AUTH_TOKEN_SECRET).update(payloadBase64).digest())
-
-const createAuthToken = (user) => {
-  const now = Math.floor(Date.now() / 1000)
-  const payload = {
-    id: user.id,
-    role: user.role,
-    exp: now + AUTH_TOKEN_EXPIRES_IN_SECONDS
-  }
-  const payloadBase64 = toBase64Url(JSON.stringify(payload))
-  const signature = signTokenPayload(payloadBase64)
-  return `${payloadBase64}.${signature}`
-}
-
-const verifyAuthToken = (token) => {
-  if (!token || typeof token !== 'string') return null
-  const [payloadBase64, signature] = token.split('.')
-  if (!payloadBase64 || !signature) return null
-
-  const expected = signTokenPayload(payloadBase64)
-  const expectedBuffer = Buffer.from(expected)
-  const signatureBuffer = Buffer.from(signature)
-  if (expectedBuffer.length !== signatureBuffer.length) return null
-  if (!crypto.timingSafeEqual(expectedBuffer, signatureBuffer)) return null
-
-  try {
-    const payload = JSON.parse(fromBase64Url(payloadBase64))
-    if (!payload?.id || !payload?.role || !payload?.exp) return null
-    const now = Math.floor(Date.now() / 1000)
-    if (now >= Number(payload.exp)) return null
-    return { id: Number(payload.id), role: String(payload.role) }
-  } catch {
-    return null
-  }
-}
+const ok = (res, data) => res.json({ code: 0, message: 'ok', data })
+const fail = (res, status, message) => res.status(status).json({ code: status, message })
 
 const getBearerToken = (req) => {
-  const value = req.headers.authorization || ''
-  if (!value.toLowerCase().startsWith('bearer ')) return ''
-  return value.slice(7).trim()
+  const header = String(req.headers.authorization || '')
+  if (!header.startsWith('Bearer ')) return ''
+  return header.slice(7).trim()
 }
 
-const authRequired = (requiredRole = '') => (req, res, next) => {
+const resolveTeacherUserIdFromAuth = (req) => {
   const token = getBearerToken(req)
-  const user = verifyAuthToken(token)
-  if (!user) return fail(res, 401, 'Unauthorized')
-  if (requiredRole && user.role !== requiredRole) return fail(res, 403, 'Forbidden')
-  req.user = user
-  next()
+  if (!token) return null
+  const userId = teacherSessions.get(token)
+  return typeof userId === 'number' ? userId : null
+}
+
+const resolveTeacherUserId = (req) => resolveTeacherUserIdFromAuth(req) ?? CURRENT_TEACHER_USER_ID
+
+const issueTeacherToken = (userId) => {
+  const token = randomUUID().replace(/-/g, '')
+  teacherSessions.set(token, userId)
+  return token
 }
 
 const parseArrayField = (value) => {
@@ -150,28 +103,159 @@ const parseObjectField = (value) => {
   return {}
 }
 
+const ensureTeacherExtensionTables = async () => {
+  const queries = [
+    "ALTER TABLE users ADD COLUMN avatar TEXT NULL",
+    "ALTER TABLE users ADD COLUMN wechat VARCHAR(50) NOT NULL DEFAULT ''",
+    `CREATE TABLE IF NOT EXISTS teacher_profiles (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL UNIQUE,
+      real_name VARCHAR(50) NOT NULL DEFAULT '',
+      city VARCHAR(50) NOT NULL DEFAULT '',
+      district VARCHAR(50) NOT NULL DEFAULT '',
+      subjects JSON,
+      grades JSON,
+      experience_years INT NOT NULL DEFAULT 0,
+      teaching_style VARCHAR(100) NOT NULL DEFAULT '',
+      student_type VARCHAR(100) NOT NULL DEFAULT '',
+      areas JSON,
+      intro TEXT,
+      verified TINYINT(1) NOT NULL DEFAULT 0,
+      verify_status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+      verify_remark VARCHAR(255) NOT NULL DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_teacher_profiles_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS teacher_verifications (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      cert_type ENUM('teacher_license','work_proof','id_card') NOT NULL,
+      cert_url TEXT NOT NULL,
+      status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+      review_remark VARCHAR(255) NOT NULL DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_teacher_verifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS questionnaires (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      role ENUM('teacher','parent') NOT NULL,
+      answers JSON NOT NULL,
+      version VARCHAR(20) NOT NULL DEFAULT 'v1',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_questionnaire_user_role(user_id, role),
+      CONSTRAINT fk_questionnaires_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS matches (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      teacher_id INT NOT NULL,
+      parent_id INT NOT NULL,
+      request_id INT NOT NULL,
+      match_score DECIMAL(5,2) NOT NULL DEFAULT 0,
+      status ENUM('new','viewed','unlocked','accepted','rejected','expired') NOT NULL DEFAULT 'new',
+      matched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      unlocked_at DATETIME DEFAULT NULL,
+      week_number INT NOT NULL,
+      UNIQUE KEY uk_match_teacher_parent_request(teacher_id, parent_id, request_id),
+      INDEX idx_match_teacher_status(teacher_id, status),
+      CONSTRAINT fk_matches_teacher FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE CASCADE,
+      CONSTRAINT fk_matches_parent FOREIGN KEY (parent_id) REFERENCES users(id) ON DELETE CASCADE,
+      CONSTRAINT fk_matches_request FOREIGN KEY (request_id) REFERENCES requests(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS contact_unlock_records (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      teacher_id INT NOT NULL,
+      parent_id INT NOT NULL,
+      request_id INT NOT NULL,
+      unlock_type ENUM('phone','wechat') NOT NULL DEFAULT 'phone',
+      unlock_cost INT NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_unlock_teacher_time(teacher_id, created_at),
+      CONSTRAINT fk_unlock_teacher FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE CASCADE,
+      CONSTRAINT fk_unlock_parent FOREIGN KEY (parent_id) REFERENCES users(id) ON DELETE CASCADE,
+      CONSTRAINT fk_unlock_request FOREIGN KEY (request_id) REFERENCES requests(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB`
+  ]
+
+  for (const sql of queries) {
+    try {
+      await pool.query(sql)
+    } catch (error) {
+      if (!String(error?.message || '').includes('Duplicate column name')) {
+        console.warn('[db] teacher extension setup warning:', error.message)
+      }
+    }
+  }
+}
+
 const getUserById = async (id) => {
   const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [id])
   return users[0] || null
 }
 
-const getTeacherInfo = async (userId) => {
-  const user = await getUserById(userId)
-  if (!user || user.role !== 'teacher') return null
-  return user
+const ensureTeacherProfile = async (user) => {
+  const [rows] = await pool.query('SELECT * FROM teacher_profiles WHERE user_id = ?', [user.id])
+  if (rows.length > 0) return rows[0]
+
+  await pool.query(
+    `INSERT INTO teacher_profiles
+      (user_id, real_name, city, district, subjects, grades, intro, verify_status)
+     VALUES (?, ?, ?, '', ?, ?, ?, 'pending')`,
+    [
+      user.id,
+      user.nickname || '',
+      user.city || '',
+      JSON.stringify(parseArrayField(user.preferred_subjects)),
+      JSON.stringify(parseArrayField(user.preferred_grade)),
+      user.bio || ''
+    ]
+  )
+  const [created] = await pool.query('SELECT * FROM teacher_profiles WHERE user_id = ?', [user.id])
+  return created[0]
 }
 
-const buildAuthPayload = (user) => ({
-  user: {
-    id: user.id,
-    role: user.role,
-    nickname: user.nickname,
-    phone: user.phone
-  },
-  token: createAuthToken(user),
-  tokenExpiresIn: AUTH_TOKEN_EXPIRES_IN_SECONDS,
-  tokenExpiresAt: new Date(Date.now() + AUTH_TOKEN_EXPIRES_IN_SECONDS * 1000).toISOString()
-})
+const getTeacherInfo = async (req = null) => getUserById(resolveTeacherUserId(req || { headers: {} }))
+
+const buildTeacherProfileDTO = async (user) => {
+  const profile = await ensureTeacherProfile(user)
+  return {
+    teacherName: user.nickname,
+    phone: user.phone,
+    city: profile.city || user.city || '',
+    district: profile.district || '',
+    bio: profile.intro || user.bio || '',
+    avatar: user.avatar,
+    wechat: user.wechat || '',
+    preferredGrades: parseArrayField(profile.grades),
+    preferredSubjects: parseArrayField(profile.subjects),
+    experienceYears: Number(profile.experience_years || 0),
+    teachingStyle: profile.teaching_style || '',
+    studentType: profile.student_type || '',
+    areas: parseArrayField(profile.areas),
+    verifyStatus: profile.verify_status || 'pending',
+    verified: !!profile.verified,
+    verifyRemark: profile.verify_remark || ''
+  }
+}
+
+const calcMatchScore = (teacherProfile, requestRow) => {
+  let score = 40
+  const subjects = parseArrayField(teacherProfile.subjects)
+  const grades = parseArrayField(teacherProfile.grades)
+  if (subjects.includes(String(requestRow.subject || ''))) score += 30
+  if (grades.includes(String(requestRow.grade || ''))) score += 20
+  if ((teacherProfile.city || '') === '上海') score += 5
+  score += Math.min(10, Number(teacherProfile.experience_years || 0))
+  return Math.min(100, score)
+}
+
+const resolveMembershipUserId = (req) => {
+  const role = String(req.query.role || '').toLowerCase()
+  return role === 'teacher' ? CURRENT_TEACHER_USER_ID : CURRENT_PARENT_USER_ID
+}
 
 app.get('/api/health', async (req, res) => {
   try {
@@ -652,38 +736,413 @@ app.post('/api/parent/settings/deactivate', async (req, res) => {
   }
 })
 
-app.get('/api/teacher/profile', authRequired('teacher'), async (req, res) => {
+app.post('/api/teacher/auth/send-code', async (_req, res) => {
+  ok(res, { sent: true, ttlSeconds: 300 })
+})
+
+app.post('/api/teacher/auth/register', async (req, res) => {
+  const phone = String(req.body?.phone || '').trim()
+  const password = String(req.body?.password || '')
+  const nickname = String(req.body?.nickname || '新老师').trim()
+  const city = String(req.body?.city || '上海').trim()
+  if (!/^1\d{10}$/.test(phone)) return fail(res, 400, 'Invalid phone')
+  if (password.length < 6) return fail(res, 400, 'Password too short')
+
+  const conn = await pool.getConnection()
   try {
-    const teacher = await getTeacherInfo(req.user.id)
-    if (!teacher) return fail(res, 404, 'Teacher not found')
+    await conn.beginTransaction()
+    const [existing] = await conn.query('SELECT id FROM users WHERE phone = ?', [phone])
+    if (existing.length) return fail(res, 409, 'Phone already registered')
+
+    const hash = await bcrypt.hash(password, 10)
+    const [result] = await conn.query(
+      `INSERT INTO users (role, nickname, phone, password_hash, city, bio, preferred_grade, preferred_subjects, avatar, wechat)
+       VALUES ('teacher', ?, ?, ?, ?, '', '', '[]', '', '')`,
+      [nickname, phone, hash, city]
+    )
+    const teacherId = Number(result.insertId)
+    await conn.query(
+      `INSERT INTO teacher_profiles (user_id, real_name, city, district, subjects, grades, intro, verify_status)
+       VALUES (?, ?, ?, '', '[]', '[]', '', 'pending')`,
+      [teacherId, nickname, city]
+    )
+    await conn.query(
+      'INSERT INTO user_settings (user_id, notifications, privacy, deactivated) VALUES (?, ?, ?, FALSE)',
+      [teacherId, JSON.stringify({ newRequest: true, messageReminder: true, systemNotice: true }), JSON.stringify({ showPhoneToParent: true, allowParentInvite: true })]
+    )
+    await conn.commit()
+    const token = issueTeacherToken(teacherId)
+    ok(res, { token, teacherId })
+  } catch (error) {
+    await conn.rollback()
+    fail(res, 500, error.message)
+  } finally {
+    conn.release()
+  }
+})
+
+app.post('/api/teacher/auth/login', async (req, res) => {
+  const phone = String(req.body?.phone || '').trim()
+  const password = String(req.body?.password || '')
+  if (!phone || !password) return fail(res, 400, 'phone and password are required')
+  try {
+    const [rows] = await pool.query('SELECT * FROM users WHERE phone = ? AND role = ?', [phone, 'teacher'])
+    const user = rows[0]
+    if (!user) return fail(res, 404, 'Teacher not found')
+    const matched = await bcrypt.compare(password, user.password_hash)
+    if (!matched) return fail(res, 400, 'Password is incorrect')
+    const token = issueTeacherToken(user.id)
+    ok(res, { token, teacherId: user.id, nickname: user.nickname })
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.post('/api/teacher/auth/logout', async (req, res) => {
+  const token = getBearerToken(req)
+  if (token) teacherSessions.delete(token)
+  ok(res, { logout: true })
+})
+
+app.get('/api/teacher/auth/me', async (req, res) => {
+  const userId = resolveTeacherUserIdFromAuth(req)
+  if (!userId) return fail(res, 401, 'Unauthorized')
+  try {
+    const user = await getUserById(userId)
+    if (!user || user.role !== 'teacher') return fail(res, 404, 'Teacher not found')
+    ok(res, { id: user.id, nickname: user.nickname, phone: user.phone, city: user.city })
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.post('/api/teacher/verification/upload', async (req, res) => {
+  const userId = resolveTeacherUserId(req)
+  const certType = String(req.body?.certType || 'work_proof')
+  const certUrl = String(req.body?.certUrl || '').trim()
+  if (!certUrl) return fail(res, 400, 'certUrl is required')
+  try {
+    await pool.query(
+      'INSERT INTO teacher_verifications (user_id, cert_type, cert_url, status) VALUES (?, ?, ?, ?)',
+      [userId, certType, certUrl, 'pending']
+    )
+    await pool.query('UPDATE teacher_profiles SET verify_status = ?, verify_remark = ? WHERE user_id = ?', ['pending', '', userId])
+    ok(res, { submitted: true })
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.get('/api/teacher/verification/status', async (req, res) => {
+  const userId = resolveTeacherUserId(req)
+  try {
+    const [profileRows] = await pool.query('SELECT verify_status, verified, verify_remark FROM teacher_profiles WHERE user_id = ?', [userId])
+    const [certRows] = await pool.query(
+      'SELECT cert_type, cert_url, status, review_remark, created_at FROM teacher_verifications WHERE user_id = ? ORDER BY created_at DESC',
+      [userId]
+    )
     ok(res, {
-      teacherName: teacher.nickname,
-      phone: teacher.phone,
-      city: teacher.city,
-      bio: teacher.bio,
-      avatar: teacher.avatar,
-      preferredGrades: parseArrayField(teacher.preferred_grade),
-      preferredSubjects: parseArrayField(teacher.preferred_subjects)
+      verifyStatus: profileRows[0]?.verify_status || 'pending',
+      verified: !!profileRows[0]?.verified,
+      verifyRemark: profileRows[0]?.verify_remark || '',
+      certificates: certRows.map((item) => ({
+        certType: item.cert_type,
+        certUrl: item.cert_url,
+        status: item.status,
+        reviewRemark: item.review_remark,
+        createdAt: new Date(item.created_at).toISOString()
+      }))
     })
   } catch (error) {
     fail(res, 500, error.message)
   }
 })
 
-app.put('/api/teacher/profile', authRequired('teacher'), async (req, res) => {
+app.post('/api/teacher/questionnaire', async (req, res) => {
+  const userId = resolveTeacherUserId(req)
+  const answers = req.body?.answers
+  if (!answers || typeof answers !== 'object') return fail(res, 400, 'answers is required')
+  try {
+    const [rows] = await pool.query("SELECT id FROM questionnaires WHERE user_id = ? AND role = 'teacher' LIMIT 1", [userId])
+    if (rows.length) {
+      await pool.query("UPDATE questionnaires SET answers = ?, updated_at = NOW() WHERE id = ?", [JSON.stringify(answers), rows[0].id])
+    } else {
+      await pool.query("INSERT INTO questionnaires (user_id, role, answers, version) VALUES (?, 'teacher', ?, 'v1')", [userId, JSON.stringify(answers)])
+    }
+    ok(res, { saved: true })
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.get('/api/teacher/questionnaire/latest', async (req, res) => {
+  const userId = resolveTeacherUserId(req)
+  try {
+    const [rows] = await pool.query(
+      "SELECT answers, updated_at FROM questionnaires WHERE user_id = ? AND role = 'teacher' ORDER BY updated_at DESC LIMIT 1",
+      [userId]
+    )
+    const row = rows[0]
+    ok(res, {
+      answers: parseObjectField(row?.answers || '{}'),
+      updatedAt: row?.updated_at ? new Date(row.updated_at).toISOString() : null
+    })
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.get('/api/teacher/matches', async (req, res) => {
+  const userId = resolveTeacherUserId(req)
+  const status = String(req.query.status || '').trim()
+  try {
+    const teacher = await getUserById(userId)
+    if (!teacher || teacher.role !== 'teacher') return fail(res, 404, 'Teacher not found')
+    const profile = await ensureTeacherProfile(teacher)
+
+    const [sourceRequests] = await pool.query(
+      `SELECT r.*, u.nickname AS parent_name
+       FROM requests r
+       JOIN users u ON r.parent_id = u.id
+       WHERE r.status IN ('pending', 'matching', 'scheduled')
+       ORDER BY r.created_at DESC
+       LIMIT 60`
+    )
+
+    for (const item of sourceRequests) {
+      const score = calcMatchScore(profile, item)
+      const [existing] = await pool.query(
+        'SELECT id FROM matches WHERE teacher_id = ? AND parent_id = ? AND request_id = ?',
+        [teacher.id, item.parent_id, item.id]
+      )
+      if (!existing.length && score >= 60) {
+        const weekNumber = Number(new Date().toISOString().slice(0, 10).replace(/-/g, '').slice(0, 6))
+        await pool.query(
+          `INSERT INTO matches (teacher_id, parent_id, request_id, match_score, status, week_number)
+           VALUES (?, ?, ?, ?, 'new', ?)`,
+          [teacher.id, item.parent_id, item.id, score, weekNumber]
+        )
+      }
+    }
+
+    const whereStatus = status ? 'AND m.status = ?' : ''
+    const params = status ? [teacher.id, status] : [teacher.id]
+    const [matches] = await pool.query(
+      `SELECT m.*, r.title, r.subject, r.grade, r.budget, r.schedule, r.status AS request_status,
+              u.nickname AS parent_name
+       FROM matches m
+       JOIN requests r ON m.request_id = r.id
+       JOIN users u ON m.parent_id = u.id
+       WHERE m.teacher_id = ? ${whereStatus}
+       ORDER BY m.match_score DESC, m.matched_at DESC`,
+      params
+    )
+    ok(
+      res,
+      matches.map((m) => ({
+        id: m.id,
+        parentId: m.parent_id,
+        requestId: m.request_id,
+        title: m.title,
+        subject: m.subject,
+        grade: m.grade,
+        budget: m.budget,
+        schedule: m.schedule,
+        requestStatus: m.request_status,
+        parentName: m.parent_name,
+        matchScore: Number(m.match_score || 0),
+        status: m.status,
+        matchedAt: new Date(m.matched_at).toISOString(),
+        unlockedAt: m.unlocked_at ? new Date(m.unlocked_at).toISOString() : null
+      }))
+    )
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.post('/api/teacher/matches/:id/unlock', async (req, res) => {
+  const userId = resolveTeacherUserId(req)
+  const matchId = Number(req.params.id)
+  const unlockType = String(req.body?.unlockType || 'phone')
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [matchRows] = await conn.query('SELECT * FROM matches WHERE id = ? AND teacher_id = ? FOR UPDATE', [matchId, userId])
+    const match = matchRows[0]
+    if (!match) return fail(res, 404, 'Match not found')
+
+    const [profileRows] = await conn.query('SELECT verified, verify_status FROM teacher_profiles WHERE user_id = ?', [userId])
+    const verifyStatus = String(profileRows[0]?.verify_status || 'pending')
+    if (verifyStatus === 'rejected') return fail(res, 403, 'Teacher is not verified')
+
+    const [membershipRows] = await conn.query('SELECT * FROM memberships WHERE user_id = ? FOR UPDATE', [userId])
+    const membership = membershipRows[0]
+    const remainingUnlock = Number(membership?.remaining_unlock ?? 0)
+
+    if (match.status !== 'unlocked') {
+      if (!membership || remainingUnlock <= 0) return fail(res, 402, 'No remaining unlock quota')
+      await conn.query('UPDATE memberships SET remaining_unlock = remaining_unlock - 1 WHERE user_id = ?', [userId])
+      await conn.query(
+        'INSERT INTO contact_unlock_records (teacher_id, parent_id, request_id, unlock_type, unlock_cost) VALUES (?, ?, ?, ?, 1)',
+        [userId, match.parent_id, match.request_id, unlockType === 'wechat' ? 'wechat' : 'phone']
+      )
+      await conn.query("UPDATE matches SET status = 'unlocked', unlocked_at = NOW() WHERE id = ?", [matchId])
+    }
+
+    const [parentRows] = await conn.query('SELECT phone, wechat, nickname FROM users WHERE id = ?', [match.parent_id])
+    await conn.commit()
+    ok(res, {
+      unlocked: true,
+      parentName: parentRows[0]?.nickname || '家长',
+      phone: parentRows[0]?.phone || '',
+      wechat: parentRows[0]?.wechat || `wx_${match.parent_id}`
+    })
+  } catch (error) {
+    await conn.rollback()
+    fail(res, 500, error.message)
+  } finally {
+    conn.release()
+  }
+})
+
+app.post('/api/teacher/matches/:id/accept', async (req, res) => {
+  const userId = resolveTeacherUserId(req)
+  const matchId = Number(req.params.id)
+  try {
+    const teacher = await getUserById(userId)
+    if (!teacher) return fail(res, 404, 'Teacher not found')
+    const [rows] = await pool.query('SELECT * FROM matches WHERE id = ? AND teacher_id = ?', [matchId, userId])
+    const match = rows[0]
+    if (!match) return fail(res, 404, 'Match not found')
+    await pool.query("UPDATE matches SET status = 'accepted' WHERE id = ?", [matchId])
+    await pool.query("UPDATE requests SET teacher_name = ?, status = 'scheduled' WHERE id = ?", [teacher.nickname, match.request_id])
+    ok(res, { accepted: true })
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.post('/api/teacher/matches/:id/reject', async (req, res) => {
+  const userId = resolveTeacherUserId(req)
+  const matchId = Number(req.params.id)
+  try {
+    const [result] = await pool.query("UPDATE matches SET status = 'rejected' WHERE id = ? AND teacher_id = ?", [matchId, userId])
+    if (!result.affectedRows) return fail(res, 404, 'Match not found')
+    ok(res, { rejected: true })
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.get('/api/teacher/unlock-records', async (req, res) => {
+  const userId = resolveTeacherUserId(req)
+  try {
+    const [rows] = await pool.query(
+      `SELECT r.*, u.nickname AS parent_name
+       FROM contact_unlock_records r
+       JOIN users u ON r.parent_id = u.id
+       WHERE r.teacher_id = ?
+       ORDER BY r.created_at DESC
+       LIMIT 100`,
+      [userId]
+    )
+    ok(
+      res,
+      rows.map((item) => ({
+        id: item.id,
+        parentId: item.parent_id,
+        parentName: item.parent_name,
+        requestId: item.request_id,
+        unlockType: item.unlock_type,
+        unlockCost: item.unlock_cost,
+        createdAt: new Date(item.created_at).toISOString()
+      }))
+    )
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.get('/api/teacher/dashboard/summary', async (req, res) => {
+  const userId = resolveTeacherUserId(req)
+  try {
+    const [matchRows] = await pool.query(
+      "SELECT SUM(status='new') AS new_count, SUM(status='unlocked') AS unlocked_count FROM matches WHERE teacher_id = ?",
+      [userId]
+    )
+    const [requestRows] = await pool.query(
+      "SELECT COUNT(*) AS mine_count FROM requests r JOIN users u ON u.id = ? WHERE r.teacher_name = u.nickname AND r.status IN ('pending','matching','scheduled')",
+      [userId]
+    )
+    const [membershipRows] = await pool.query('SELECT remaining_unlock FROM memberships WHERE user_id = ?', [userId])
+    ok(res, {
+      newMatchCount: Number(matchRows[0]?.new_count || 0),
+      unlockedMatchCount: Number(matchRows[0]?.unlocked_count || 0),
+      processingRequestCount: Number(requestRows[0]?.mine_count || 0),
+      remainingUnlock: Number(membershipRows[0]?.remaining_unlock || 0)
+    })
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+app.get('/api/teacher/profile', async (req, res) => {
+  try {
+    const teacher = await getTeacherInfo(req)
+    if (!teacher) return fail(res, 404, 'Teacher not found')
+    ok(res, await buildTeacherProfileDTO(teacher))
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.put('/api/teacher/profile', async (req, res) => {
   const payload = req.body || {}
   if (!payload.teacherName || !payload.phone) return fail(res, 400, 'teacherName and phone are required')
+  const teacherId = resolveTeacherUserId(req)
+  const preferredGrades = Array.isArray(payload.preferredGrades) ? payload.preferredGrades : []
+  const preferredSubjects = Array.isArray(payload.preferredSubjects) ? payload.preferredSubjects : []
   try {
     await pool.query(
-      'UPDATE users SET nickname=?, phone=?, city=?, bio=?, preferred_grade=?, preferred_subjects=? WHERE id=?',
+      'UPDATE users SET nickname=?, phone=?, city=?, bio=?, preferred_grade=?, preferred_subjects=?, wechat=? WHERE id=?',
       [
         payload.teacherName,
         payload.phone,
         payload.city || '',
         payload.bio || '',
-        Array.isArray(payload.preferredGrades) ? payload.preferredGrades.join(',') : '',
-        JSON.stringify(payload.preferredSubjects || []),
-        req.user.id
+        preferredGrades.join(','),
+        JSON.stringify(preferredSubjects),
+        String(payload.wechat || ''),
+        teacherId
+      ]
+    )
+    await pool.query(
+      `INSERT INTO teacher_profiles
+        (user_id, real_name, city, district, subjects, grades, experience_years, teaching_style, student_type, areas, intro, verify_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+       ON DUPLICATE KEY UPDATE
+         real_name=VALUES(real_name),
+         city=VALUES(city),
+         district=VALUES(district),
+         subjects=VALUES(subjects),
+         grades=VALUES(grades),
+         experience_years=VALUES(experience_years),
+         teaching_style=VALUES(teaching_style),
+         student_type=VALUES(student_type),
+         areas=VALUES(areas),
+         intro=VALUES(intro)`,
+      [
+        teacherId,
+        payload.teacherName,
+        payload.city || '',
+        String(payload.district || ''),
+        JSON.stringify(preferredSubjects),
+        JSON.stringify(preferredGrades),
+        Number(payload.experienceYears || 0),
+        String(payload.teachingStyle || ''),
+        String(payload.studentType || ''),
+        JSON.stringify(Array.isArray(payload.areas) ? payload.areas : []),
+        String(payload.bio || '')
       ]
     )
     ok(res, { updated: true })
@@ -695,17 +1154,18 @@ app.put('/api/teacher/profile', authRequired('teacher'), async (req, res) => {
 app.post('/api/teacher/avatar', authRequired('teacher'), async (req, res) => {
   const avatar = String(req.body?.avatar || '')
   if (!avatar) return fail(res, 400, 'Missing avatar data')
+  const teacherId = resolveTeacherUserId(req)
   try {
-    await pool.query('UPDATE users SET avatar = ? WHERE id = ?', [avatar, req.user.id])
+    await pool.query('UPDATE users SET avatar = ? WHERE id = ?', [avatar, teacherId])
     ok(res, { avatar })
   } catch (error) {
     fail(res, 500, error.message)
   }
 })
 
-app.get('/api/teacher/requests', authRequired('teacher'), async (req, res) => {
+app.get('/api/teacher/requests', async (req, res) => {
   try {
-    const teacher = await getTeacherInfo(req.user.id)
+    const teacher = await getTeacherInfo(req)
     if (!teacher) return fail(res, 404, 'Teacher not found')
 
     const [rows] = await pool.query(
@@ -741,7 +1201,7 @@ app.get('/api/teacher/requests', authRequired('teacher'), async (req, res) => {
 app.post('/api/teacher/requests/:id/accept', authRequired('teacher'), async (req, res) => {
   const id = Number(req.params.id)
   try {
-    const teacher = await getTeacherInfo(req.user.id)
+    const teacher = await getTeacherInfo(req)
     if (!teacher) return fail(res, 404, 'Teacher not found')
     const [result] = await pool.query(
       `UPDATE requests
@@ -759,7 +1219,7 @@ app.post('/api/teacher/requests/:id/accept', authRequired('teacher'), async (req
 app.post('/api/teacher/requests/:id/release', authRequired('teacher'), async (req, res) => {
   const id = Number(req.params.id)
   try {
-    const teacher = await getTeacherInfo(req.user.id)
+    const teacher = await getTeacherInfo(req)
     if (!teacher) return fail(res, 404, 'Teacher not found')
     const [result] = await pool.query(
       `UPDATE requests
@@ -781,7 +1241,7 @@ app.patch('/api/teacher/requests/:id/status', authRequired('teacher'), async (re
     return fail(res, 400, 'Invalid status')
   }
   try {
-    const teacher = await getTeacherInfo(req.user.id)
+    const teacher = await getTeacherInfo(req)
     if (!teacher) return fail(res, 404, 'Teacher not found')
     const [result] = await pool.query('UPDATE requests SET status = ? WHERE id = ? AND teacher_name = ?', [
       status,
@@ -795,9 +1255,9 @@ app.patch('/api/teacher/requests/:id/status', authRequired('teacher'), async (re
   }
 })
 
-app.get('/api/teacher/reviews', authRequired('teacher'), async (req, res) => {
+app.get('/api/teacher/reviews', async (req, res) => {
   try {
-    const teacher = await getTeacherInfo(req.user.id)
+    const teacher = await getTeacherInfo(req)
     if (!teacher) return fail(res, 404, 'Teacher not found')
 
     const [reviews] = await pool.query(
@@ -825,9 +1285,9 @@ app.get('/api/teacher/reviews', authRequired('teacher'), async (req, res) => {
   }
 })
 
-app.get('/api/teacher/analytics', authRequired('teacher'), async (req, res) => {
+app.get('/api/teacher/analytics', async (req, res) => {
   try {
-    const teacher = await getTeacherInfo(req.user.id)
+    const teacher = await getTeacherInfo(req)
     if (!teacher) return fail(res, 404, 'Teacher not found')
 
     const [requestRows] = await pool.query(
@@ -873,9 +1333,10 @@ app.get('/api/teacher/analytics', authRequired('teacher'), async (req, res) => {
   }
 })
 
-app.get('/api/teacher/membership/status', authRequired('teacher'), async (req, res) => {
+app.get('/api/teacher/membership/status', async (req, res) => {
+  const teacherId = resolveTeacherUserId(req)
   try {
-    const [memberships] = await pool.query('SELECT * FROM memberships WHERE user_id = ?', [req.user.id])
+    const [memberships] = await pool.query('SELECT * FROM memberships WHERE user_id = ?', [teacherId])
     if (!memberships.length) {
       return ok(res, { planName: '普通老师', expireAt: null, remainingUnlock: 3, weeklyPriorityQuota: 1 })
       return ok(res, { planName: '普通老师', expireAt: null, remainingUnlock: 3, weeklyPriorityQuota: 1 })
@@ -928,7 +1389,8 @@ app.get('/api/teacher/membership/plans', authRequired('teacher'), async (req, re
   ])
 })
 
-app.post('/api/teacher/membership/subscribe', authRequired('teacher'), async (req, res) => {
+app.post('/api/teacher/membership/subscribe', async (req, res) => {
+  const teacherId = resolveTeacherUserId(req)
   const planId = String(req.body?.plan_id || '')
   const autoRenew = Boolean(req.body?.auto_renew)
   const planMap = {
@@ -954,7 +1416,7 @@ app.post('/api/teacher/membership/subscribe', authRequired('teacher'), async (re
          remaining_unlock=VALUES(remaining_unlock),
          weekly_priority_quota=VALUES(weekly_priority_quota),
          auto_renew=VALUES(auto_renew)`,
-      [req.user.id, selected.name, expire, selected.unlock, selected.quota, autoRenew]
+      [teacherId, selected.name, expire, selected.unlock, selected.quota, autoRenew]
     )
 
     ok(res, {
@@ -969,9 +1431,10 @@ app.post('/api/teacher/membership/subscribe', authRequired('teacher'), async (re
   }
 })
 
-app.get('/api/teacher/settings', authRequired('teacher'), async (req, res) => {
+app.get('/api/teacher/settings', async (req, res) => {
+  const teacherId = resolveTeacherUserId(req)
   try {
-    const [rows] = await pool.query('SELECT * FROM user_settings WHERE user_id = ?', [req.user.id])
+    const [rows] = await pool.query('SELECT * FROM user_settings WHERE user_id = ?', [teacherId])
     if (!rows.length) return ok(res, { notifications: {}, privacy: {} })
     ok(res, {
       notifications: parseObjectField(rows[0].notifications),
@@ -982,31 +1445,33 @@ app.get('/api/teacher/settings', authRequired('teacher'), async (req, res) => {
   }
 })
 
-app.put('/api/teacher/settings/password', authRequired('teacher'), async (req, res) => {
+app.put('/api/teacher/settings/password', async (req, res) => {
+  const teacherId = resolveTeacherUserId(req)
   const currentPassword = String(req.body?.current_password || '')
   const nextPassword = String(req.body?.new_password || '')
   if (nextPassword.length < 6) return fail(res, 400, 'New password must be at least 6 chars')
   try {
-    const [users] = await pool.query('SELECT password_hash FROM users WHERE id = ?', [req.user.id])
+    const [users] = await pool.query('SELECT password_hash FROM users WHERE id = ?', [teacherId])
     if (!users.length) return fail(res, 404, 'Teacher not found')
     const matched = await bcrypt.compare(currentPassword, users[0].password_hash)
     if (!matched) return fail(res, 400, 'Current password is incorrect')
     const hash = await bcrypt.hash(nextPassword, 10)
-    await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [hash, req.user.id])
+    await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [hash, teacherId])
     ok(res, { updated: true })
   } catch (error) {
     fail(res, 500, error.message)
   }
 })
 
-app.put('/api/teacher/settings/notifications', authRequired('teacher'), async (req, res) => {
+app.put('/api/teacher/settings/notifications', async (req, res) => {
+  const teacherId = resolveTeacherUserId(req)
   try {
-    const [rows] = await pool.query('SELECT notifications FROM user_settings WHERE user_id = ?', [req.user.id])
+    const [rows] = await pool.query('SELECT notifications FROM user_settings WHERE user_id = ?', [teacherId])
     const current = rows.length ? parseObjectField(rows[0].notifications) : {}
     const nextOpts = { ...current, ...(req.body || {}) }
     await pool.query(
       'INSERT INTO user_settings (user_id, notifications) VALUES (?, ?) ON DUPLICATE KEY UPDATE notifications=VALUES(notifications)',
-      [req.user.id, JSON.stringify(nextOpts)]
+      [teacherId, JSON.stringify(nextOpts)]
     )
     ok(res, nextOpts)
   } catch (error) {
@@ -1014,14 +1479,15 @@ app.put('/api/teacher/settings/notifications', authRequired('teacher'), async (r
   }
 })
 
-app.put('/api/teacher/settings/privacy', authRequired('teacher'), async (req, res) => {
+app.put('/api/teacher/settings/privacy', async (req, res) => {
+  const teacherId = resolveTeacherUserId(req)
   try {
-    const [rows] = await pool.query('SELECT privacy FROM user_settings WHERE user_id = ?', [req.user.id])
+    const [rows] = await pool.query('SELECT privacy FROM user_settings WHERE user_id = ?', [teacherId])
     const current = rows.length ? parseObjectField(rows[0].privacy) : {}
     const nextOpts = { ...current, ...(req.body || {}) }
     await pool.query(
       'INSERT INTO user_settings (user_id, privacy) VALUES (?, ?) ON DUPLICATE KEY UPDATE privacy=VALUES(privacy)',
-      [req.user.id, JSON.stringify(nextOpts)]
+      [teacherId, JSON.stringify(nextOpts)]
     )
     ok(res, nextOpts)
   } catch (error) {
@@ -1204,9 +1670,9 @@ io.on('connection', (socket) => {
 
 app.use((_req, res) => fail(res, 404, 'Not Found'))
 
+await ensureTeacherExtensionTables()
+
 httpServer.listen(PORT, () => {
   console.log(`[api] running at http://localhost:${PORT} (with WebSocket)`)
 })
-
-
 

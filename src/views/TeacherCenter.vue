@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Edit3, ClipboardList, Star, BarChart3, Crown, Settings, ChevronRight } from 'lucide-vue-next'
+import { Edit3, ClipboardList, Star, BarChart3, Crown, Settings, ChevronRight, FileText, ListChecks } from 'lucide-vue-next'
 import { teacherApi, type TeacherMembershipStatusDTO, type TeacherProfileDTO } from '../api/teacher'
 
 interface MenuItem {
@@ -16,6 +16,7 @@ const router = useRouter()
 
 const profile = ref<TeacherProfileDTO | null>(null)
 const membership = ref<TeacherMembershipStatusDTO | null>(null)
+const dashboardSummary = ref({ newMatchCount: 0, unlockedMatchCount: 0, processingRequestCount: 0, remainingUnlock: 0 })
 const loading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
@@ -24,6 +25,9 @@ const menuItems: MenuItem[] = [
   { title: '收到的请求', icon: ClipboardList, path: '/teacher-center/requests' },
   { title: '我的评价', icon: Star, path: '/teacher-center/reviews' },
   { title: '数据中心', icon: BarChart3, path: '/teacher-center/analytics' },
+  { title: '匹配问卷', icon: FileText, path: '/teacher-center/questionnaire' },
+  { title: '匹配池', icon: ListChecks, path: '/teacher-center/match-pool' },
+  { title: '解锁记录', icon: ClipboardList, path: '/teacher-center/unlock-records' },
   { title: '会员中心', icon: Crown, path: '/teacher-center/vip', highlight: true },
   { title: '账户设置', icon: Settings, path: '/teacher-center/settings' }
 ]
@@ -33,9 +37,14 @@ const rankName = computed(() => membership.value?.planName || '普通老师')
 const loadData = async () => {
   loading.value = true
   try {
-    const [profileData, membershipData] = await Promise.all([teacherApi.getProfile(), teacherApi.getMembershipStatus()])
+    const [profileData, membershipData, summary] = await Promise.all([
+      teacherApi.getProfile(),
+      teacherApi.getMembershipStatus(),
+      teacherApi.getDashboardSummary()
+    ])
     profile.value = profileData
     membership.value = membershipData
+    dashboardSummary.value = summary
   } catch (error) {
     console.error('Failed to load teacher center data:', error)
   } finally {
@@ -103,6 +112,8 @@ onMounted(loadData)
         <div class="membership-benefits">
           <div>本周优先配额：{{ membership?.weeklyPriorityQuota ?? 0 }} 次</div>
           <div>剩余解锁：{{ membership?.remainingUnlock ?? 0 }} 次</div>
+          <div>今日新推荐：{{ dashboardSummary.newMatchCount }} 条</div>
+          <div>处理中请求：{{ dashboardSummary.processingRequestCount }} 条</div>
         </div>
         <button class="btn-membership" @click="navigateTo('/teacher-center/vip')">提升曝光</button>
       </div>

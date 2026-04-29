@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS users (
   nickname VARCHAR(50) NOT NULL DEFAULT '',
   phone VARCHAR(20) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
+  avatar TEXT,
+  wechat VARCHAR(50) NOT NULL DEFAULT '',
   city VARCHAR(50) DEFAULT '',
   bio TEXT,
   avatar LONGTEXT,
@@ -85,6 +87,87 @@ CREATE TABLE IF NOT EXISTS user_settings (
   privacy JSON,
   deactivated BOOLEAN DEFAULT FALSE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 教师画像
+CREATE TABLE IF NOT EXISTS teacher_profiles (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL UNIQUE,
+  real_name VARCHAR(50) NOT NULL DEFAULT '',
+  city VARCHAR(50) NOT NULL DEFAULT '',
+  district VARCHAR(50) NOT NULL DEFAULT '',
+  subjects JSON,
+  grades JSON,
+  experience_years INT NOT NULL DEFAULT 0,
+  teaching_style VARCHAR(100) NOT NULL DEFAULT '',
+  student_type VARCHAR(100) NOT NULL DEFAULT '',
+  areas JSON,
+  intro TEXT,
+  verified TINYINT(1) NOT NULL DEFAULT 0,
+  verify_status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+  verify_remark VARCHAR(255) NOT NULL DEFAULT '',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_teacher_profiles_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 教师认证材料
+CREATE TABLE IF NOT EXISTS teacher_verifications (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  cert_type ENUM('teacher_license','work_proof','id_card') NOT NULL,
+  cert_url TEXT NOT NULL,
+  status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+  review_remark VARCHAR(255) NOT NULL DEFAULT '',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_teacher_verifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 问卷
+CREATE TABLE IF NOT EXISTS questionnaires (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  role ENUM('teacher','parent') NOT NULL,
+  answers JSON NOT NULL,
+  version VARCHAR(20) NOT NULL DEFAULT 'v1',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_questionnaire_user_role(user_id, role),
+  CONSTRAINT fk_questionnaires_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 匹配结果
+CREATE TABLE IF NOT EXISTS matches (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  teacher_id INT NOT NULL,
+  parent_id INT NOT NULL,
+  request_id INT NOT NULL,
+  match_score DECIMAL(5,2) NOT NULL DEFAULT 0,
+  status ENUM('new','viewed','unlocked','accepted','rejected','expired') NOT NULL DEFAULT 'new',
+  matched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  unlocked_at DATETIME DEFAULT NULL,
+  week_number INT NOT NULL,
+  UNIQUE KEY uk_match_teacher_parent_request(teacher_id, parent_id, request_id),
+  INDEX idx_match_teacher_status(teacher_id, status),
+  CONSTRAINT fk_matches_teacher FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_matches_parent FOREIGN KEY (parent_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_matches_request FOREIGN KEY (request_id) REFERENCES requests(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 联系方式解锁记录
+CREATE TABLE IF NOT EXISTS contact_unlock_records (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  teacher_id INT NOT NULL,
+  parent_id INT NOT NULL,
+  request_id INT NOT NULL,
+  unlock_type ENUM('phone','wechat') NOT NULL DEFAULT 'phone',
+  unlock_cost INT NOT NULL DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_unlock_teacher_time(teacher_id, created_at),
+  CONSTRAINT fk_unlock_teacher FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_unlock_parent FOREIGN KEY (parent_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_unlock_request FOREIGN KEY (request_id) REFERENCES requests(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- 会话表

@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import GlassCard from '../components/GlassCard.vue'
-import { setAuthSession, teacherLogin, teacherRegister } from '../api/auth'
+import { teacherApi } from '../api/teacher'
 
 const router = useRouter()
 const currentStep = ref(1)
@@ -11,82 +11,54 @@ const isLoginMode = ref(false)
 const phone = ref('')
 const code = ref('')
 const password = ref('')
+const city = ref('上海')
 
 const nickname = ref('')
 const gender = ref('')
-const subject = ref('')
-const exp = ref('')
-const loading = ref(false)
-const errorText = ref('')
+const certUrl = ref('')
+const feedback = ref('')
 
-const switchToLogin = () => {
-  isLoginMode.value = true
-  currentStep.value = 1
-  errorText.value = ''
-}
-
-const switchToRegister = () => {
-  isLoginMode.value = false
-  currentStep.value = 1
-  errorText.value = ''
-}
-
-const nextStep = () => {
-  if (currentStep.value === 1 && (!phone.value || !password.value)) {
-    errorText.value = '请填写手机号和密码'
-    return
+const nextStep = async () => {
+  feedback.value = ''
+  if (currentStep.value === 1) {
+    try {
+      await teacherApi.register({
+        phone: phone.value,
+        password: password.value,
+        code: code.value,
+        nickname: nickname.value || '新老师',
+        city: city.value
+      })
+    } catch (error) {
+      try {
+        await teacherApi.login(phone.value, password.value)
+      } catch (e) {
+        feedback.value = e?.message || error?.message || '老师注册失败'
+        return
+      }
+    }
   }
-  if (currentStep.value === 2 && (!nickname.value || !subject.value)) {
-    errorText.value = '请填写姓名和科目'
-    return
+
+  if (currentStep.value === 3 && certUrl.value.trim()) {
+    try {
+      await teacherApi.submitVerification('teacher_license', certUrl.value.trim())
+    } catch (error) {
+      feedback.value = error?.message || '认证材料提交失败'
+      return
+    }
   }
-  errorText.value = ''
+
   if (currentStep.value < 4) {
     currentStep.value++
   }
 }
 
 const finishRegister = async () => {
-  loading.value = true
-  errorText.value = ''
-  try {
-    const data = await teacherRegister({
-      phone: phone.value.trim(),
-      password: password.value,
-      nickname: nickname.value.trim(),
-      subject: subject.value.trim(),
-      experience: exp.value.trim()
-    })
-    if (!data?.token || !data?.user) throw new Error('注册返回数据不完整')
-    setAuthSession(data.token, data.user)
-    router.push('/teacher-center')
-  } catch (error) {
-    errorText.value = (error && error.message) || '提交失败，请稍后重试'
-  } finally {
-    loading.value = false
-  }
-}
-
-const handleTeacherLogin = async () => {
-  if (!phone.value || !password.value) {
-    errorText.value = '请填写手机号和密码'
+  if (!teacherApi.getToken()) {
+    feedback.value = '登录状态失效，请重新登录'
     return
   }
-  loading.value = true
-  errorText.value = ''
-  try {
-    const data = await teacherLogin({
-      phone: phone.value.trim(),
-      password: password.value
-    })
-    if (!data?.token || !data?.user) throw new Error('登录返回数据不完整')
-    setAuthSession(data.token, data.user)
-    router.push('/teacher-center')
-  } catch (error) {
-    errorText.value = (error && error.message) || '登录失败，请稍后重试'
-  } finally {
-    loading.value = false
-  }
+  router.push('/teacher-center')
 }
 </script>
 
@@ -177,6 +149,12 @@ const handleTeacherLogin = async () => {
               </div>
             </div>
 
+            <div class="input-group">
+              <div class="input-wrapper">
+                <input type="text" v-model="city" class="input-field" placeholder="所在城市" required>
+              </div>
+            </div>
+
             <button type="submit" class="btn btn-teacher w-100 mt-4">下一步</button>
           </form>
         </div>
@@ -226,7 +204,7 @@ const handleTeacherLogin = async () => {
             <div class="cert-icon">📄</div>
             <p class="cert-title">上传教师资格证或从业证明</p>
             <p class="cert-desc">选填，提交后可提升信任度和曝光权重</p>
-            <button class="btn btn-ghost btn-teacher-ghost mt-3">选择文件</button>
+            <input v-model="certUrl" class="input-field mt-3" type="text" placeholder="粘贴证书图片/文件地址（可选）">
             <p class="upload-hint mt-2">支持 JPG、PNG、PDF，不超过 5MB</p>
           </div>
 
@@ -252,6 +230,7 @@ const handleTeacherLogin = async () => {
         <div v-if="isLoginMode" class="text-center mt-4 text-sub">
           还没有老师账号？ <button class="inline-link-btn text-teacher" @click="switchToRegister">去入驻</button>
         </div>
+        <p v-if="feedback" class="feedback">{{ feedback }}</p>
       </GlassCard>
     </div>
   </div>
@@ -457,16 +436,5 @@ const handleTeacherLogin = async () => {
 .border-0 { border: none !important; }
 
 .success-icon { font-size: 64px; }
-.error-text {
-  color: #e11d48;
-  font-size: 13px;
-}
-
-.inline-link-btn {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  font-size: inherit;
-}
+.feedback { margin-top: 12px; color: #b91c1c; font-size: 13px; text-align: center; }
 </style>

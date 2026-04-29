@@ -13,9 +13,15 @@ const form = reactive({
   teacherName: '',
   phone: '',
   city: '',
+  district: '',
+  wechat: '',
   bio: '',
   preferredSubjects: [] as string[],
-  preferredGrades: [] as string[]
+  preferredGrades: [] as string[],
+  experienceYears: 0,
+  teachingStyle: '',
+  studentType: '',
+  areas: [] as string[]
 })
 
 const toggle = (arr: string[], value: string) => {
@@ -35,9 +41,15 @@ const loadProfile = async () => {
     form.teacherName = data.teacherName
     form.phone = data.phone
     form.city = data.city
+    form.district = data.district || ''
+    form.wechat = data.wechat || ''
     form.bio = data.bio
     form.preferredSubjects = Array.isArray(data.preferredSubjects) ? [...data.preferredSubjects] : []
     form.preferredGrades = Array.isArray(data.preferredGrades) ? [...data.preferredGrades] : []
+    form.experienceYears = Number(data.experienceYears || 0)
+    form.teachingStyle = data.teachingStyle || ''
+    form.studentType = data.studentType || ''
+    form.areas = Array.isArray(data.areas) ? [...data.areas] : []
   } catch (error) {
     feedback.value = (error as Error).message || '加载老师资料失败'
   } finally {
@@ -93,6 +105,35 @@ onMounted(loadProfile)
         <label>
           城市
           <input v-model="form.city" type="text" />
+        </label>
+        <label>
+          区县
+          <input v-model="form.district" type="text" />
+        </label>
+        <label>
+          微信号
+          <input v-model="form.wechat" type="text" />
+        </label>
+        <label>
+          教龄
+          <input v-model.number="form.experienceYears" type="number" min="0" max="50" />
+        </label>
+        <label>
+          教学风格
+          <input v-model="form.teachingStyle" type="text" placeholder="如：鼓励式、结构化、启发式" />
+        </label>
+        <label>
+          学生类型
+          <input v-model="form.studentType" type="text" placeholder="如：基础薄弱、冲刺拔高" />
+        </label>
+        <label>
+          授课区域
+          <input
+            :value="form.areas.join('、')"
+            type="text"
+            placeholder="多个区域用逗号分隔"
+            @input="form.areas = String(($event.target as HTMLInputElement).value).split(/[，,\\s]+/).filter(Boolean)"
+          />
         </label>
         <label class="full">
           个人简介
