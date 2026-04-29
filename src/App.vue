@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
 import NavBar from './components/NavBar.vue'
+import BottomNav from './components/BottomNav.vue'
 
 const route = useRoute()
 </script>
@@ -10,6 +11,7 @@ const route = useRoute()
   <main class="app-main" :class="{ 'no-padding': route.meta.hideNav }">
     <router-view></router-view>
   </main>
+  <BottomNav />
   
   <!-- 底部版权区 -->
   <footer class="app-footer" v-if="!route.meta.hideFooter">
@@ -63,6 +65,7 @@ const route = useRoute()
 @media (max-width: 768px) {
   .app-main {
     padding: 24px 16px;
+    padding-bottom: 76px;
   }
 }
 </style>

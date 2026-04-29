@@ -1,8 +1,8 @@
 ﻿<script setup>
-import { ref } from 'vue'
+import { onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import GlassCard from '../components/GlassCard.vue'
-import { setAuthSession, teacherLogin, teacherRegister } from '../api/auth'
+import { setAuthSession, teacherLogin, teacherRegister, teacherSendCode } from '../api/auth'
 
 const router = useRouter()
 const currentStep = ref(1)
@@ -16,50 +16,147 @@ const nickname = ref('')
 const gender = ref('')
 const subject = ref('')
 const exp = ref('')
+const teachingMethods = ref([])
+const feeRange = ref('100_150')
+const school = ref('')
+const inviteCode = ref('')
+
+const certType = ref('teacher_license')
+const certFileName = ref('')
+const certUrl = ref('')
+
 const loading = ref(false)
+const sendingCode = ref(false)
+const codeCountdown = ref(0)
+const devCodeHint = ref('')
 const errorText = ref('')
+
+let codeTimer = null
+
+const startCodeTimer = (seconds) => {
+  if (codeTimer) window.clearInterval(codeTimer)
+  codeCountdown.value = seconds
+  codeTimer = window.setInterval(() => {
+    if (codeCountdown.value <= 1) {
+      window.clearInterval(codeTimer)
+      codeTimer = null
+      codeCountdown.value = 0
+      return
+    }
+    codeCountdown.value -= 1
+  }, 1000)
+}
+
+const resetRegisterForm = () => {
+  currentStep.value = 1
+  errorText.value = ''
+}
 
 const switchToLogin = () => {
   isLoginMode.value = true
-  currentStep.value = 1
   errorText.value = ''
 }
 
 const switchToRegister = () => {
   isLoginMode.value = false
-  currentStep.value = 1
+  resetRegisterForm()
+}
+
+const sendCode = async () => {
+  const phoneText = phone.value.trim()
+  if (!/^1\d{10}$/.test(phoneText)) {
+    errorText.value = '请输入正确的11位手机号'
+    return
+  }
+  sendingCode.value = true
   errorText.value = ''
+  devCodeHint.value = ''
+  try {
+    const data = await teacherSendCode(phoneText)
+    startCodeTimer(Number(data.expireInSeconds || 60))
+    if (data.debugCode) {
+      devCodeHint.value = `开发环境验证码：${data.debugCode}`
+    }
+  } catch (error) {
+    errorText.value = (error && error.message) || '验证码发送失败，请稍后重试'
+  } finally {
+    sendingCode.value = false
+  }
 }
 
 const nextStep = () => {
-  if (currentStep.value === 1 && (!phone.value || !password.value)) {
-    errorText.value = '请填写手机号和密码'
-    return
+  if (currentStep.value === 1) {
+    if (!/^1\d{10}$/.test(phone.value.trim()) || !password.value || !code.value.trim()) {
+      errorText.value = '请填写手机号、验证码和密码'
+      return
+    }
+    if (password.value.length < 6) {
+      errorText.value = '密码至少6位'
+      return
+    }
   }
-  if (currentStep.value === 2 && (!nickname.value || !subject.value)) {
-    errorText.value = '请填写姓名和科目'
-    return
+
+  if (currentStep.value === 2) {
+    if (!nickname.value.trim() || !subject.value.trim()) {
+      errorText.value = '请填写姓名和擅长科目'
+      return
+    }
+    if (teachingMethods.value.length === 0) {
+      errorText.value = '请至少选择一种授课方式'
+      return
+    }
   }
+
   errorText.value = ''
   if (currentStep.value < 4) {
-    currentStep.value++
+    currentStep.value += 1
   }
+}
+
+const handleCertFileChange = async (event) => {
+  const input = event.target
+  const file = input?.files?.[0]
+  if (!file) return
+
+  if (file.size > 2 * 1024 * 1024) {
+    errorText.value = '认证文件请控制在 2MB 以内'
+    input.value = ''
+    return
+  }
+
+  certFileName.value = file.name
+  errorText.value = ''
+
+  const reader = new FileReader()
+  reader.onload = () => {
+    certUrl.value = typeof reader.result === 'string' ? reader.result : ''
+  }
+  reader.onerror = () => {
+    errorText.value = '读取文件失败，请重试'
+  }
+  reader.readAsDataURL(file)
 }
 
 const finishRegister = async () => {
   loading.value = true
   errorText.value = ''
   try {
-    const data = await teacherRegister({
+    await teacherRegister({
       phone: phone.value.trim(),
       password: password.value,
+      code: code.value.trim(),
       nickname: nickname.value.trim(),
       subject: subject.value.trim(),
-      experience: exp.value.trim()
+      experience: exp.value.trim(),
+      gender: gender.value === 'female' ? 'female' : 'male',
+      teachingMethods: teachingMethods.value,
+      feeRange: feeRange.value,
+      school: school.value.trim(),
+      inviteCode: inviteCode.value.trim(),
+      certType: certUrl.value ? certType.value : undefined,
+      certUrl: certUrl.value || undefined
     })
-    if (!data?.token || !data?.user) throw new Error('注册返回数据不完整')
-    setAuthSession(data.token, data.user)
-    router.push('/teacher-center')
+    currentStep.value = 4
   } catch (error) {
     errorText.value = (error && error.message) || '提交失败，请稍后重试'
   } finally {
@@ -68,8 +165,8 @@ const finishRegister = async () => {
 }
 
 const handleTeacherLogin = async () => {
-  if (!phone.value || !password.value) {
-    errorText.value = '请填写手机号和密码'
+  if (!/^1\d{10}$/.test(phone.value.trim()) || !password.value) {
+    errorText.value = '请填写正确的手机号和密码'
     return
   }
   loading.value = true
@@ -87,6 +184,19 @@ const handleTeacherLogin = async () => {
   } finally {
     loading.value = false
   }
+}
+
+onUnmounted(() => {
+  if (codeTimer) {
+    window.clearInterval(codeTimer)
+    codeTimer = null
+  }
+})
+
+const toggleTeachingMethod = (value) => {
+  const index = teachingMethods.value.indexOf(value)
+  if (index >= 0) teachingMethods.value.splice(index, 1)
+  else teachingMethods.value.push(value)
 }
 </script>
 
@@ -138,114 +248,155 @@ const handleTeacherLogin = async () => {
         </div>
 
         <template v-else>
-        <!-- 步骤指示器 -->
-        <div class="step-indicator mb-4">
-          <div class="step" :class="{ active: currentStep >= 1, completed: currentStep > 1 }">
-            <div class="step-dot"></div>
-            <span class="step-label">验证手机</span>
+          <div class="step-indicator mb-4">
+            <div class="step" :class="{ active: currentStep >= 1, completed: currentStep > 1 }">
+              <div class="step-dot"></div>
+              <span class="step-label">验证手机</span>
+            </div>
+            <div class="step-line" :class="{ active: currentStep >= 2 }"></div>
+            <div class="step" :class="{ active: currentStep >= 2, completed: currentStep > 2 }">
+              <div class="step-dot"></div>
+              <span class="step-label">完善资料</span>
+            </div>
+            <div class="step-line" :class="{ active: currentStep >= 3 }"></div>
+            <div class="step" :class="{ active: currentStep >= 3, completed: currentStep > 3 }">
+              <div class="step-dot"></div>
+              <span class="step-label">提交审核</span>
+            </div>
           </div>
-          <div class="step-line" :class="{ active: currentStep >= 2 }"></div>
-          <div class="step" :class="{ active: currentStep >= 2, completed: currentStep > 2 }">
-            <div class="step-dot"></div>
-            <span class="step-label">完善资料</span>
+
+          <div v-if="currentStep === 1" class="step-content">
+            <form @submit.prevent="nextStep">
+              <div class="input-group">
+                <div class="input-wrapper">
+                  <input type="tel" v-model="phone" class="input-field" placeholder="手机号" required>
+                </div>
+              </div>
+
+              <div class="input-group">
+                <div class="input-wrapper code-wrapper">
+                  <input type="text" v-model="code" class="input-field" placeholder="验证码" required>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-teacher-ghost btn-sm"
+                    :disabled="sendingCode || codeCountdown > 0"
+                    @click="sendCode"
+                  >
+                    {{ codeCountdown > 0 ? `${codeCountdown}s后重发` : (sendingCode ? '发送中...' : '获取验证码') }}
+                  </button>
+                </div>
+              </div>
+
+              <div class="hint-text" v-if="devCodeHint">{{ devCodeHint }}</div>
+
+              <div class="input-group">
+                <div class="input-wrapper">
+                  <input type="password" v-model="password" class="input-field" placeholder="设置密码（至少6位）" required>
+                </div>
+              </div>
+
+              <button type="submit" class="btn btn-teacher w-100 mt-4">下一步</button>
+            </form>
           </div>
-          <div class="step-line" :class="{ active: currentStep >= 3 }"></div>
-          <div class="step" :class="{ active: currentStep >= 3, completed: currentStep > 3 }">
-            <div class="step-dot"></div>
-            <span class="step-label">身份认证</span>
+
+          <div v-if="currentStep === 2" class="step-content">
+            <form @submit.prevent="nextStep">
+              <div class="input-group">
+                <div class="input-wrapper">
+                  <input type="text" v-model="nickname" class="input-field" placeholder="真实姓名" required>
+                </div>
+              </div>
+
+              <div class="input-group">
+                <select v-model="gender" class="select-field">
+                  <option value="" disabled>性别（选填）</option>
+                  <option value="male">男</option>
+                  <option value="female">女</option>
+                </select>
+              </div>
+
+              <div class="input-group">
+                <div class="input-wrapper">
+                  <input type="text" v-model="subject" class="input-field" placeholder="擅长科目（如数学）" required>
+                </div>
+              </div>
+
+              <div class="input-group">
+                <div class="input-wrapper">
+                  <input type="text" v-model="exp" class="input-field" placeholder="教学经验（如3年）">
+                </div>
+              </div>
+
+              <div class="input-group">
+                <div class="input-wrapper">
+                  <input type="text" v-model="school" class="input-field" placeholder="毕业院校（选填）">
+                </div>
+              </div>
+
+              <div class="input-group">
+                <select v-model="feeRange" class="select-field">
+                  <option value="under_100">100元/小时以内</option>
+                  <option value="100_150">100-150元/小时</option>
+                  <option value="150_200">150-200元/小时</option>
+                  <option value="over_200">200元/小时以上</option>
+                </select>
+              </div>
+
+              <div class="input-group">
+                <div class="method-group">
+                  <button type="button" class="method-chip" :class="{ active: teachingMethods.includes('one_on_one') }" @click="toggleTeachingMethod('one_on_one')">一对一</button>
+                  <button type="button" class="method-chip" :class="{ active: teachingMethods.includes('small_class') }" @click="toggleTeachingMethod('small_class')">小班(3-5人)</button>
+                  <button type="button" class="method-chip" :class="{ active: teachingMethods.includes('online') }" @click="toggleTeachingMethod('online')">线上</button>
+                  <button type="button" class="method-chip" :class="{ active: teachingMethods.includes('offline') }" @click="toggleTeachingMethod('offline')">线下</button>
+                </div>
+              </div>
+
+              <div class="input-group">
+                <div class="input-wrapper">
+                  <input type="text" v-model="inviteCode" class="input-field" placeholder="邀请码（选填）">
+                </div>
+              </div>
+
+              <button type="submit" class="btn btn-teacher w-100 mt-4">下一步</button>
+            </form>
           </div>
-        </div>
 
-        <div v-if="currentStep === 1" class="step-content">
-          <form @submit.prevent="nextStep">
-            <div class="input-group">
-              <div class="input-wrapper">
-                <input type="tel" v-model="phone" class="input-field" placeholder="手机号" required>
-              </div>
-            </div>
+          <div v-if="currentStep === 3" class="step-content">
+            <div class="cert-upload mb-4">
+              <div class="cert-icon">📄</div>
+              <p class="cert-title">上传教师资格证或从业证明</p>
+              <p class="cert-desc">选填，提交后可提升信任度和曝光权重</p>
 
-            <div class="input-group">
-              <div class="input-wrapper">
-                <input type="text" v-model="code" class="input-field" placeholder="验证码" required>
-                <button type="button" class="btn btn-ghost btn-teacher-ghost btn-sm" style="margin-right: 4px;">获取验证码</button>
-              </div>
-            </div>
-
-            <div class="input-group">
-              <div class="input-wrapper">
-                <input type="password" v-model="password" class="input-field" placeholder="设置密码" required>
-              </div>
-            </div>
-
-            <button type="submit" class="btn btn-teacher w-100 mt-4">下一步</button>
-          </form>
-        </div>
-
-        <div v-if="currentStep === 2" class="step-content">
-          <form @submit.prevent="nextStep">
-            <div class="avatar-upload mb-4">
-              <div class="upload-box">
-                <span class="upload-icon">+</span>
-                <span class="upload-text">上传头像</span>
-              </div>
-              <p class="upload-hint">支持 JPG、PNG，建议 200×200</p>
-            </div>
-
-            <div class="input-group">
-              <div class="input-wrapper">
-                <input type="text" v-model="nickname" class="input-field" placeholder="真实姓名" required>
-              </div>
-            </div>
-
-            <div class="input-group">
-              <select v-model="gender" class="select-field" required>
-                <option value="" disabled>性别</option>
-                <option value="male">男</option>
-                <option value="female">女</option>
+              <select v-model="certType" class="select-field mt-3">
+                <option value="teacher_license">教师资格证</option>
+                <option value="work_proof">从业证明</option>
+                <option value="id_card">身份证明</option>
               </select>
+
+              <label class="btn btn-ghost btn-teacher-ghost mt-3 file-btn">
+                选择文件
+                <input type="file" accept="image/png,image/jpeg,application/pdf" @change="handleCertFileChange" hidden>
+              </label>
+              <p class="upload-hint mt-2">支持 JPG、PNG、PDF，不超过 2MB</p>
+              <p class="upload-hint" v-if="certFileName">已选择：{{ certFileName }}</p>
             </div>
 
-            <div class="input-group">
-              <div class="input-wrapper">
-                <input type="text" v-model="subject" class="input-field" placeholder="擅长科目（如数学）" required>
-              </div>
-            </div>
-
-            <div class="input-group">
-              <div class="input-wrapper">
-                <input type="text" v-model="exp" class="input-field" placeholder="教学经验（如3年）">
-              </div>
-            </div>
-            
-            <button type="submit" class="btn btn-teacher w-100 mt-4">下一步</button>
-          </form>
-        </div>
-
-        <div v-if="currentStep === 3" class="step-content">
-          <div class="cert-upload mb-4">
-            <div class="cert-icon">📄</div>
-            <p class="cert-title">上传教师资格证或从业证明</p>
-            <p class="cert-desc">选填，提交后可提升信任度和曝光权重</p>
-            <button class="btn btn-ghost btn-teacher-ghost mt-3">选择文件</button>
-            <p class="upload-hint mt-2">支持 JPG、PNG、PDF，不超过 5MB</p>
+            <button @click="finishRegister" class="btn btn-teacher w-100" :disabled="loading">
+              {{ loading ? '提交中...' : '提交入驻审核' }}
+            </button>
+            <button @click="finishRegister" class="btn btn-ghost btn-teacher-ghost w-100 mt-2 border-0" :disabled="loading">跳过材料，直接提交</button>
           </div>
 
-          <button @click="nextStep" class="btn btn-teacher w-100">提交认证</button>
-          <button @click="nextStep" class="btn btn-ghost btn-teacher-ghost w-100 mt-2 border-0">跳过，稍后再传</button>
-        </div>
-
-        <div v-if="currentStep === 4" class="step-content text-center">
-          <div class="success-icon mb-3">✅</div>
-          <h2 class="mb-2">入驻成功！</h2>
-          <p class="text-sub mb-4">您的资料已提交，去完善更多信息提升曝光率吧。</p>
-          <button @click="finishRegister" class="btn btn-teacher w-100" :disabled="loading">
-            {{ loading ? '提交中...' : '前往个人中心' }}
-          </button>
-        </div>
+          <div v-if="currentStep === 4" class="step-content text-center">
+            <div class="success-icon mb-3">✅</div>
+            <h2 class="mb-2">已提交审核</h2>
+            <p class="text-sub mb-4">平台将在 1-3 个工作日完成审核，审核通过后可登录老师中心。</p>
+            <button @click="switchToLogin" class="btn btn-teacher w-100">返回登录</button>
+          </div>
         </template>
 
         <p v-if="errorText" class="error-text mt-3">{{ errorText }}</p>
-        
+
         <div v-if="!isLoginMode && currentStep === 1" class="text-center mt-4 text-sub">
           已有老师账号？ <button class="inline-link-btn text-teacher" @click="switchToLogin">立即登录</button>
         </div>
@@ -258,20 +409,7 @@ const handleTeacherLogin = async () => {
 </template>
 
 <style scoped>
-.teacher-theme {
-  --color-primary: var(--color-teacher);
-  --gradient-primary: var(--gradient-teacher);
-}
-
-.btn-teacher-ghost {
-  color: var(--color-teacher);
-  border-color: var(--color-teacher);
-}
-
-.btn-teacher-ghost:hover {
-  background: rgba(16, 168, 129, 0.08);
-}
-
+/* layout */
 .auth-layout {
   display: flex;
   min-height: calc(100vh - 120px);
@@ -283,8 +421,8 @@ const handleTeacherLogin = async () => {
 .form-section { flex: 6; display: flex; justify-content: flex-end; }
 
 .brand-logo { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
-.brand-logo-icon { width: 44px; height: 44px; background: var(--gradient-teacher); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; color: white; }
-.brand-logo-text { font-size: 22px; font-weight: bold; background: var(--gradient-teacher); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.brand-logo-icon { width: 44px; height: 44px; background: var(--gradient-primary); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; color: white; }
+.brand-logo-text { font-size: 22px; font-weight: bold; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 .brand-title { font-size: 36px; font-weight: bold; color: var(--color-text-main); line-height: 1.4; margin-bottom: 16px; }
 .brand-subtitle { font-size: 16px; color: var(--color-text-sub); line-height: 1.8; }
 .value-tags { display: flex; flex-direction: column; gap: 12px; }
@@ -292,8 +430,9 @@ const handleTeacherLogin = async () => {
 
 .glow-effect { position: absolute; border-radius: 50%; filter: blur(80px); z-index: -1; }
 .glow-1 { top: -50px; right: 0; width: 300px; height: 300px; background: rgba(16, 168, 129, 0.15); }
-.glow-2 { bottom: -100px; left: 50px; width: 250px; height: 250px; background: rgba(5, 150, 105, 0.1); }
+.glow-2 { bottom: -100px; left: 50px; width: 250px; height: 250px; background: rgba(20, 184, 166, 0.1); }
 
+/* step indicator */
 .step-indicator {
   display: flex;
   align-items: center;
@@ -318,16 +457,11 @@ const handleTeacherLogin = async () => {
   transition: all 0.3s;
 }
 
-.step.active .step-dot {
+.step.active .step-dot,
+.step.completed .step-dot {
   border-color: var(--color-teacher);
   background: var(--color-teacher);
-  box-shadow: 0 0 0 4px rgba(16, 168, 129, 0.2);
-}
-
-.step.completed .step-dot {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  box-shadow: none;
+  box-shadow: 0 0 0 4px rgba(16, 168, 129, 0.18);
 }
 
 .step-label {
@@ -335,13 +469,10 @@ const handleTeacherLogin = async () => {
   color: var(--color-text-light);
 }
 
-.step.active .step-label {
+.step.active .step-label,
+.step.completed .step-label {
   color: var(--color-teacher);
   font-weight: 600;
-}
-
-.step.completed .step-label {
-  color: var(--color-text-main);
 }
 
 .step-line {
@@ -357,31 +488,26 @@ const handleTeacherLogin = async () => {
   background: var(--color-teacher);
 }
 
-.mode-switch {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.mode-btn {
+/* common */
+.w-100 { width: 100%; }
+.text-center { text-align: center; }
+.code-wrapper { gap: 8px; }
+.hint-text { color: #059669; font-size: 12px; margin-top: -6px; margin-bottom: 10px; }
+.file-btn { display: inline-flex; cursor: pointer; }
+.method-group { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }
+.method-chip {
   border: 1px solid var(--color-border);
-  background: white;
-  border-radius: 10px;
-  padding: 8px 10px;
-  font-size: 13px;
+  background: #fff;
+  border-radius: 999px;
+  padding: 6px 10px;
   cursor: pointer;
   color: var(--color-text-sub);
 }
-
-.mode-btn.active {
+.method-chip.active {
   border-color: var(--color-teacher);
-  color: var(--color-teacher);
-  background: rgba(16, 168, 129, 0.08);
+  background: rgba(16, 168, 129, 0.12);
+  color: #047857;
 }
-
-/* 注册特有样式 */
-.w-100 { width: 100%; }
-.text-center { text-align: center; }
 
 .select-field {
   width: 100%;
@@ -398,75 +524,22 @@ const handleTeacherLogin = async () => {
 
 .select-field:focus {
   border-color: var(--color-teacher);
-  box-shadow: 0 0 0 3px rgba(16, 168, 129, 0.1);
+  box-shadow: 0 0 0 3px rgba(16, 168, 129, 0.12);
 }
 
-.avatar-upload {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
+.success-icon {
+  font-size: 64px;
 }
 
-.upload-box {
-  width: 100%;
-  height: 160px;
-  border: 2px dashed var(--color-border);
-  border-radius: 12px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.3s;
-  background: rgba(255,255,255,0.5);
-}
-
-.upload-box:hover {
-  border-color: var(--color-teacher);
-  background: rgba(16, 168, 129, 0.05);
-}
-
-.upload-icon {
-  font-size: 32px;
-  color: var(--color-text-light);
-  margin-bottom: 8px;
-}
-
-.upload-text {
-  color: var(--color-text-sub);
-  font-size: 14px;
-}
-
-.upload-hint {
-  font-size: 12px;
-  color: var(--color-text-light);
-}
-
-.cert-upload {
-  text-align: center;
-  padding: 32px 0;
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  background: white;
-}
-
-.cert-icon { font-size: 48px; margin-bottom: 16px; }
-.cert-title { font-weight: bold; margin-bottom: 4px; }
-.cert-desc { font-size: 14px; color: var(--color-text-sub); }
-.border-0 { border: none !important; }
-
-.success-icon { font-size: 64px; }
 .error-text {
   color: #e11d48;
   font-size: 13px;
 }
 
-.inline-link-btn {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  font-size: inherit;
+@media (max-width: 992px) {
+  .auth-layout { flex-direction: column; gap: 32px; }
+  .brand-section { padding-right: 0; text-align: center; }
+  .value-tags { align-items: center; }
+  .form-section { justify-content: center; width: 100%; }
 }
 </style>

@@ -1,4 +1,4 @@
-﻿import { request, unwrapData } from './http'
+﻿import { request, unwrapData, AUTH_TOKEN_STORAGE_KEY } from './http'
 
 export type TeacherRequestStatus = 'pending' | 'matching' | 'scheduled' | 'completed' | 'cancelled'
 export type MatchStatus = 'new' | 'viewed' | 'unlocked' | 'accepted' | 'rejected' | 'expired'
@@ -8,11 +8,15 @@ export interface TeacherProfileDTO {
   phone: string
   city: string
   district?: string
+  gender?: 'male' | 'female'
   bio: string
   avatar?: string
   wechat?: string
   preferredGrades: string[]
   preferredSubjects: string[]
+  teachingMethods?: string[]
+  feeRange?: 'under_100' | '100_150' | '150_200' | 'over_200'
+  school?: string
   experienceYears?: number
   teachingStyle?: string
   studentType?: string
@@ -41,6 +45,8 @@ export interface TeacherReviewDTO {
   parentName: string
   subject: string
   rating: number
+  integrityRating?: number
+  responsibilityRating?: number
   content: string
   date: string
 }
@@ -108,8 +114,15 @@ export interface TeacherMatchDTO {
   schedule: string
   requestStatus: string
   parentName: string
+  city?: string
   matchScore: number
   status: MatchStatus
+  parentAcceptStatus?: 'pending' | 'accepted' | 'rejected'
+  teacherAcceptStatus?: 'pending' | 'accepted' | 'rejected'
+  unlockGranted?: boolean
+  rematchCount?: number
+  degradeLevel?: number
+  matchTips?: string[]
   matchedAt: string
   unlockedAt: string | null
 }
@@ -136,6 +149,70 @@ export interface DashboardSummaryDTO {
   unlockedMatchCount: number
   processingRequestCount: number
   remainingUnlock: number
+  integrityScore: number
+  totalReviewCount: number
+  totalUnlockCount: number
+  totalViewCount: number
+}
+
+export interface TeacherMatchQuery {
+  status?: MatchStatus
+  grade?: string
+  subject?: string
+  city?: string
+  district?: string
+  budgetMin?: number
+  budgetMax?: number
+}
+
+export interface TeacherNotificationsDTO {
+  unlockRequests: Array<{
+    id: number
+    title: string
+    parentName: string
+    subject: string
+    grade: string
+    budget: string
+    createdAt: string
+    status: MatchStatus
+  }>
+  matchUpdates: Array<{
+    id: number
+    title: string
+    content: string
+    createdAt: string
+  }>
+  reviewNotices: Array<{
+    id: number
+    title: string
+    content: string
+    createdAt: string
+  }>
+  complaintNotices: Array<{
+    id: number
+    title: string
+    content: string
+    createdAt: string
+    status: 'pending' | 'processing' | 'resolved' | 'rejected'
+    appealStatus: 'none' | 'pending' | 'approved' | 'rejected'
+    appealable: boolean
+    hasAppealed: boolean
+    result?: string
+    type?: string
+  }>
+  systemNotices: Array<{
+    id: number
+    title: string
+    content: string
+    createdAt: string
+  }>
+}
+
+export interface TeacherInviteSummaryDTO {
+  inviteCode: string
+  totalInvited: number
+  verifiedInvited: number
+  extraMatchQuota: number
 }
 
 const ENDPOINTS = {
@@ -162,22 +239,28 @@ const ENDPOINTS = {
   questionnaireLatest: '/api/teacher/questionnaire/latest',
   matches: '/api/teacher/matches',
   unlockRecords: '/api/teacher/unlock-records',
-  dashboardSummary: '/api/teacher/dashboard/summary'
+  dashboardSummary: '/api/teacher/dashboard/summary',
+  notifications: '/api/teacher/notifications',
+  complaints: '/api/teacher/complaints',
+  inviteSummary: '/api/teacher/invite/summary',
+  inviteCreate: '/api/teacher/invite/create'
 }
 
 const TEACHER_TOKEN_KEY = 'teacher_token'
 
 const getTeacherToken = () => {
   if (typeof localStorage === 'undefined') return ''
-  return localStorage.getItem(TEACHER_TOKEN_KEY) || ''
+  return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || localStorage.getItem(TEACHER_TOKEN_KEY) || ''
 }
 
 const setTeacherToken = (token: string) => {
   if (typeof localStorage === 'undefined') return
   if (!token) {
+    localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
     localStorage.removeItem(TEACHER_TOKEN_KEY)
     return
   }
+  localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token)
   localStorage.setItem(TEACHER_TOKEN_KEY, token)
 }
 
@@ -216,11 +299,15 @@ const normalizeProfile = (raw: Record<string, any>): TeacherProfileDTO => ({
   phone: String(raw.phone || ''),
   city: String(raw.city || ''),
   district: String(raw.district || ''),
+  gender: String(raw.gender || 'male') === 'female' ? 'female' : 'male',
   bio: String(raw.bio || ''),
   avatar: String(raw.avatar || ''),
   wechat: String(raw.wechat || ''),
   preferredGrades: ensureArray(raw.preferredGrades || raw.preferred_grades || raw.preferredGrade || raw.preferred_grade),
   preferredSubjects: ensureArray(raw.preferredSubjects || raw.preferred_subjects || raw.subjects),
+  teachingMethods: ensureArray(raw.teachingMethods || raw.teaching_methods),
+  feeRange: String(raw.feeRange || raw.fee_range || '100_150') as 'under_100' | '100_150' | '150_200' | 'over_200',
+  school: String(raw.school || ''),
   experienceYears: Number(raw.experienceYears || raw.experience_years || 0),
   teachingStyle: String(raw.teachingStyle || raw.teaching_style || ''),
   studentType: String(raw.studentType || raw.student_type || ''),
@@ -249,6 +336,8 @@ const normalizeReview = (raw: Record<string, any>): TeacherReviewDTO => ({
   parentName: String(raw.parentName || raw.parent_name || '家长'),
   subject: String(raw.subject || ''),
   rating: Number(raw.rating || 0),
+  integrityRating: Number(raw.integrityRating || raw.integrity_rating || raw.rating || 0),
+  responsibilityRating: Number(raw.responsibilityRating || raw.responsibility_rating || raw.rating || 0),
   content: String(raw.content || ''),
   date: String(raw.date || raw.created_at || '')
 })
@@ -297,12 +386,22 @@ export const teacherApi = {
   setToken: setTeacherToken,
 
   async sendCode(phone: string) {
-    await teacherRequest(ENDPOINTS.authSendCode, { method: 'POST', body: { phone } })
+    const payload = await teacherRequest(ENDPOINTS.authSendCode, { method: 'POST', body: { phone } })
+    return unwrapData(payload, { sent: false, expireInSeconds: 300, debugCode: '' as string | undefined })
   },
 
-  async register(payload: { phone: string; password: string; code?: string; nickname?: string; city?: string }) {
+  async register(payload: {
+    phone: string
+    password: string
+    code: string
+    nickname: string
+    city?: string
+    subject?: string
+    experience?: string
+    certType?: 'teacher_license' | 'work_proof' | 'id_card'
+    certUrl?: string
+  }) {
     const result = unwrapData(await teacherRequest(ENDPOINTS.authRegister, { method: 'POST', body: payload }), {} as Record<string, any>)
-    if (result.token) setTeacherToken(String(result.token))
     return result
   },
 
@@ -358,9 +457,18 @@ export const teacherApi = {
     return unwrapData(payload, { answers: {}, updatedAt: null as string | null })
   },
 
-  async getMatches(status?: MatchStatus) {
-    const query = status ? `?status=${status}` : ''
-    const payload = await teacherRequest(`${ENDPOINTS.matches}${query}`)
+  async getMatches(query: TeacherMatchQuery = {}) {
+    const search = new URLSearchParams()
+    if (query.status) search.set('status', query.status)
+    if (query.grade) search.set('grade', query.grade)
+    if (query.subject) search.set('subject', query.subject)
+    if (query.city) search.set('city', query.city)
+    if (query.district) search.set('district', query.district)
+    if (Number.isFinite(query.budgetMin)) search.set('budgetMin', String(query.budgetMin))
+    if (Number.isFinite(query.budgetMax)) search.set('budgetMax', String(query.budgetMax))
+    const queryString = search.toString()
+    const path = queryString ? `${ENDPOINTS.matches}?${queryString}` : ENDPOINTS.matches
+    const payload = await teacherRequest(path)
     const list = unwrapData(payload, [] as Record<string, any>[])
     return Array.isArray(list) ? (list as TeacherMatchDTO[]) : []
   },
@@ -378,6 +486,18 @@ export const teacherApi = {
     await teacherRequest(`${ENDPOINTS.matches}/${id}/reject`, { method: 'POST' })
   },
 
+  async feedbackMatch(id: number, reason: string) {
+    const payload = await teacherRequest(`${ENDPOINTS.matches}/${id}/feedback`, { method: 'POST', body: { reason } })
+    return unwrapData(payload, { rematched: false, generated: 0 })
+  },
+
+  async submitReview(matchId: number, integrityRating: number, responsibilityRating: number, comment: string) {
+    await teacherRequest(`/api/matches/${matchId}/review`, {
+      method: 'POST',
+      body: { integrityRating, responsibilityRating, comment }
+    })
+  },
+
   async getUnlockRecords() {
     const payload = await teacherRequest(ENDPOINTS.unlockRecords)
     const list = unwrapData(payload, [] as Record<string, any>[])
@@ -390,8 +510,50 @@ export const teacherApi = {
       newMatchCount: 0,
       unlockedMatchCount: 0,
       processingRequestCount: 0,
-      remainingUnlock: 0
+      remainingUnlock: 0,
+      integrityScore: 80,
+      totalReviewCount: 0,
+      totalUnlockCount: 0,
+      totalViewCount: 0
     } as DashboardSummaryDTO)
+  },
+
+  async getNotifications() {
+    const payload = await teacherRequest(ENDPOINTS.notifications)
+    return unwrapData(payload, {
+      unlockRequests: [],
+      matchUpdates: [],
+      reviewNotices: [],
+      complaintNotices: [],
+      systemNotices: []
+    } as TeacherNotificationsDTO)
+  },
+
+  async acceptUnlockRequest(id: number) {
+    await teacherRequest(`${ENDPOINTS.notifications}/unlock-requests/${id}/accept`, { method: 'POST' })
+  },
+
+  async rejectUnlockRequest(id: number) {
+    await teacherRequest(`${ENDPOINTS.notifications}/unlock-requests/${id}/reject`, { method: 'POST' })
+  },
+
+  async submitComplaintAppeal(id: number, content: string) {
+    await teacherRequest(`${ENDPOINTS.complaints}/${id}/appeal`, { method: 'POST', body: { content } })
+  },
+
+  async getInviteSummary() {
+    const payload = await teacherRequest(ENDPOINTS.inviteSummary)
+    return unwrapData(payload, {
+      inviteCode: '',
+      totalInvited: 0,
+      verifiedInvited: 0,
+      extraMatchQuota: 0
+    } as TeacherInviteSummaryDTO)
+  },
+
+  async createInviteCode() {
+    const payload = await teacherRequest(ENDPOINTS.inviteCreate, { method: 'POST' })
+    return unwrapData(payload, { inviteCode: '' })
   },
 
   async getRequests() {
@@ -458,3 +620,4 @@ export const teacherApi = {
     await teacherRequest(ENDPOINTS.settingsPrivacy, { method: 'PUT', body: privacy })
   }
 }
+

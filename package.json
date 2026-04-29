@@ -12,6 +12,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@vant/area-data": "^2.1.0",
     "bcryptjs": "^3.0.3",
     "express": "^4.21.2",
     "lucide-vue-next": "^1.0.0",

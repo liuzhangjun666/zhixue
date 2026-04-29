@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { teacherApi, type TeacherReviewDTO } from '../../api/teacher'
 
@@ -9,7 +9,7 @@ const keyword = ref('')
 
 const average = computed(() => {
   if (reviews.value.length === 0) return 0
-  const total = reviews.value.reduce((sum, item) => sum + item.rating, 0)
+  const total = reviews.value.reduce((sum, item) => sum + Number(item.rating || 0), 0)
   return (total / reviews.value.length).toFixed(1)
 })
 
@@ -19,7 +19,10 @@ const filtered = computed(() => {
   return reviews.value.filter((item) => item.parentName.includes(kw) || item.subject.includes(kw) || item.content.includes(kw))
 })
 
-const stars = (rating: number) => '★'.repeat(Math.max(0, rating)) + '☆'.repeat(Math.max(0, 5 - rating))
+const stars = (rating: number) => {
+  const n = Math.max(0, Math.min(5, Math.round(Number(rating || 0))))
+  return '★'.repeat(n) + '☆'.repeat(5 - n)
+}
 
 const loadReviews = async () => {
   loading.value = true
@@ -41,7 +44,7 @@ onMounted(loadReviews)
     <header class="card header">
       <div>
         <h1>我的评价</h1>
-        <p>维护好评价有助于提升老师匹配排序。</p>
+        <p>查看家长给你的诚信与责任心评价，持续优化服务体验。</p>
       </div>
       <div class="score">综合评分 {{ average }}</div>
     </header>
@@ -61,7 +64,11 @@ onMounted(loadReviews)
           <span class="stars">{{ stars(item.rating) }}</span>
         </div>
         <p class="date">{{ item.date }}</p>
-        <p class="content">{{ item.content }}</p>
+        <div class="metric-row">
+          <span>诚信度：{{ stars(item.integrityRating || item.rating) }}</span>
+          <span>责任心：{{ stars(item.responsibilityRating || item.rating) }}</span>
+        </div>
+        <p class="content">{{ item.content || '该评价未填写文字内容' }}</p>
       </article>
     </div>
 
@@ -87,7 +94,7 @@ onMounted(loadReviews)
 .item h2 { margin: 0; font-size: 18px; color: #111827; }
 .stars { color: #f59e0b; font-weight: 700; }
 .date { margin: 8px 0 0; color: #9ca3af; font-size: 13px; }
+.metric-row { margin-top: 10px; display: flex; gap: 18px; color: #374151; font-size: 14px; }
 .content { margin: 10px 0 0; color: #4b5563; line-height: 1.6; }
 .feedback { margin: 0; border: 1px solid #fecaca; background: #fef2f2; color: #b91c1c; border-radius: 12px; padding: 12px; }
 </style>
-
