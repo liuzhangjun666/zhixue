@@ -29,6 +29,19 @@ CREATE TABLE IF NOT EXISTS children (
   FOREIGN KEY (parent_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- 家长偏好画像（用于双向匹配）
+CREATE TABLE IF NOT EXISTS parent_profiles (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL UNIQUE,
+  city VARCHAR(50) DEFAULT '',
+  district VARCHAR(50) DEFAULT '',
+  teaching_style_preference VARCHAR(50) DEFAULT '',
+  teacher_gender_preference VARCHAR(20) DEFAULT 'any',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_parent_profiles_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 -- 辅导请求
 CREATE TABLE IF NOT EXISTS requests (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -304,6 +317,14 @@ INSERT INTO children (id, parent_id, name, grade, target_subject) VALUES
 (1, 1, '李小明', '四年级', '数学'),
 (2, 1, '李小雨', '一年级', '英语')
 ON DUPLICATE KEY UPDATE name=VALUES(name);
+
+INSERT INTO parent_profiles (user_id, city, district, teaching_style_preference, teacher_gender_preference) VALUES
+(1, '上海', '浦东新区', 'guiding', 'any')
+ON DUPLICATE KEY UPDATE
+  city=VALUES(city),
+  district=VALUES(district),
+  teaching_style_preference=VALUES(teaching_style_preference),
+  teacher_gender_preference=VALUES(teacher_gender_preference);
 
 -- 辅导请求
 INSERT INTO requests (id, parent_id, title, subject, grade, budget, schedule, status, teacher_name, created_at) VALUES

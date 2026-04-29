@@ -1,14 +1,28 @@
 ﻿<script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { AUTH_USER_STORAGE_KEY } from '../api/http'
 
 const route = useRoute()
-const items = [
+
+const role = computed(() => {
+  if (typeof window === 'undefined') return 'parent'
+  const raw = window.localStorage.getItem(AUTH_USER_STORAGE_KEY) || ''
+  if (!raw) return 'parent'
+  try {
+    const parsed = JSON.parse(raw)
+    return String(parsed?.role || 'parent') === 'teacher' ? 'teacher' : 'parent'
+  } catch {
+    return 'parent'
+  }
+})
+
+const items = computed(() => [
   { label: '首页', to: '/' },
-  { label: '发现', to: '/teacher-center/match-pool' },
+  { label: '发现', to: role.value === 'teacher' ? '/teacher-center/match-pool' : '/discover' },
   { label: '消息', to: '/messages' },
-  { label: '我的', to: '/teacher-center' }
-]
+  { label: '我的', to: role.value === 'teacher' ? '/teacher-center' : '/parent-center' }
+])
 
 const shouldShow = computed(() => !route.meta.hideNav)
 </script>

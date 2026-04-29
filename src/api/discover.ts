@@ -20,6 +20,9 @@ export interface DiscoverTeacherDTO {
   ratingAvg: number
   ratingCount: number
   intro: string
+  gender?: 'male' | 'female'
+  level?: 'gold' | 'silver' | 'bronze' | 'free'
+  levelLabel?: string
   verified: boolean
   isActive: boolean
   updatedAt: string
@@ -35,6 +38,7 @@ export interface DiscoverTeacherQuery {
   subject?: string
   grade?: string
   city?: string
+  gender?: string
   min_price?: string | number
   max_price?: string | number
   mode?: string
@@ -80,6 +84,9 @@ const normalizeTeacher = (raw: Record<string, any>): DiscoverTeacherDTO => ({
   ratingAvg: Number(raw.ratingAvg || 0),
   ratingCount: Number(raw.ratingCount || 0),
   intro: String(raw.intro || ''),
+  gender: String(raw.gender || 'male') === 'female' ? 'female' : 'male',
+  level: String(raw.level || 'free') as 'gold' | 'silver' | 'bronze' | 'free',
+  levelLabel: String(raw.levelLabel || ''),
   verified: Boolean(raw.verified),
   isActive: raw.isActive !== false,
   updatedAt: String(raw.updatedAt || ''),
@@ -106,6 +113,18 @@ export const discoverApi = {
 
   async contactTeacher(teacherId: number) {
     const payload = await request(`/api/discover/teachers/${teacherId}/contact`, { method: 'POST' })
-    return unwrapData(payload, { conversationId: 0, teacherId } as { conversationId: number; teacherId: number })
+    return unwrapData(payload, {
+      conversationId: 0,
+      teacherId,
+      remainingUnlock: 0,
+      unlimitedUnlock: false,
+      contact: { phone: '', wechat: '', nickname: '' }
+    } as {
+      conversationId: number
+      teacherId: number
+      remainingUnlock: number
+      unlimitedUnlock: boolean
+      contact: { phone: string; wechat: string; nickname: string }
+    })
   }
 }

@@ -116,6 +116,22 @@ async function run() {
       console.log('[warn] table requests not found, skip discover migration')
       return
     }
+    if (!(await tableExists('parent_profiles'))) {
+      await pool.query(
+        `CREATE TABLE parent_profiles (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          user_id INT NOT NULL UNIQUE,
+          city VARCHAR(50) DEFAULT '',
+          district VARCHAR(50) DEFAULT '',
+          teaching_style_preference VARCHAR(50) DEFAULT '',
+          teacher_gender_preference VARCHAR(20) DEFAULT 'any',
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          CONSTRAINT fk_parent_profiles_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB`
+      )
+      console.log('[ok] created parent_profiles')
+    }
     if (!(await tableExists('teacher_profiles'))) {
       await pool.query(
         `CREATE TABLE teacher_profiles (
@@ -150,6 +166,7 @@ async function run() {
     }
 
     await ensureColumn('requests', 'description', 'description TEXT')
+    await ensureColumn('teacher_profiles', 'gender', "gender ENUM('male','female') NOT NULL DEFAULT 'male'")
     await ensureColumn('teacher_profiles', 'hourly_price_min', 'hourly_price_min DECIMAL(10,2) DEFAULT NULL')
     await ensureColumn('teacher_profiles', 'hourly_price_max', 'hourly_price_max DECIMAL(10,2) DEFAULT NULL')
     await ensureColumn(

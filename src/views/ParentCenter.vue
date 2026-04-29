@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Edit3, ClipboardList, Star, Crown, Settings, ChevronRight } from 'lucide-vue-next'
+import { Edit3, ClipboardList, Star, Crown, Settings, Bell } from 'lucide-vue-next'
 import { parentApi, type ParentProfileDTO } from '../api/parent'
 
 const router = useRouter()
@@ -10,6 +10,7 @@ const showVipModal = ref<boolean>(false)
 
 const userProfile = ref<ParentProfileDTO | null>(null)
 const requestCount = ref<number>(0)
+const notificationCount = ref<number>(0)
 const fileInput = ref<HTMLInputElement | null>(null)
 
 onMounted(async () => {
@@ -23,6 +24,12 @@ onMounted(async () => {
     requestCount.value = Array.isArray(requests) ? requests.length : 0
   } catch (e) {
     console.error('Failed to load request count', e)
+  }
+  try {
+    const notifications = await parentApi.getNotifications()
+    notificationCount.value = Array.isArray(notifications.matchUpdates) ? notifications.matchUpdates.length : 0
+  } catch (e) {
+    console.error('Failed to load notifications', e)
   }
 })
 
@@ -62,6 +69,7 @@ interface MenuItem {
 
 const menuItems = computed<MenuItem[]>(() => [
   { title: '编辑资料', icon: Edit3, path: '/parent/edit' },
+  { title: '通知中心', icon: Bell, path: '/parent/notifications', badge: notificationCount.value > 0 ? notificationCount.value : undefined },
   { title: '我的请求', icon: ClipboardList, path: '/parent/requests', badge: requestCount.value > 0 ? requestCount.value : undefined },
   { title: '我的评价', icon: Star, path: '/parent/reviews', suffix: '共 12 条' },
   {

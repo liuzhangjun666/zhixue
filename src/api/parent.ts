@@ -48,6 +48,7 @@ export interface MembershipStatusDTO {
   expireAt: string
   remainingUnlock: number
   weeklyPriorityQuota: number
+  unlimitedUnlock?: boolean
 }
 
 export interface MembershipPlanDTO {
@@ -73,6 +74,27 @@ export interface ParentSettingsDTO {
   }
 }
 
+export interface ParentNotificationsDTO {
+  matchUpdates: Array<{
+    id: number
+    matchId: number
+    requestId: number
+    title: string
+    content: string
+    createdAt: string
+    status: string
+    teacherName?: string
+    subject?: string
+    grade?: string
+  }>
+  systemNotices: Array<{
+    id: number
+    title: string
+    content: string
+    createdAt: string
+  }>
+}
+
 const ENDPOINTS = {
   profile: '/api/parent/profile',
   requests: '/api/parent/requests',
@@ -85,7 +107,8 @@ const ENDPOINTS = {
   settingsPassword: '/api/parent/settings/password',
   settingsNotifications: '/api/parent/settings/notifications',
   settingsPrivacy: '/api/parent/settings/privacy',
-  settingsDeactivate: '/api/parent/settings/deactivate'
+  settingsDeactivate: '/api/parent/settings/deactivate',
+  notifications: '/api/parent/notifications'
 }
 
 const parseStatus = (value: unknown): RequestStatus => {
@@ -146,7 +169,8 @@ const normalizeMembershipStatus = (raw: Record<string, any>): MembershipStatusDT
   planName: String(raw.planName || raw.plan_name || '普通用户'),
   expireAt: String(raw.expireAt || raw.expire_at || '-'),
   remainingUnlock: Number(raw.remainingUnlock || raw.remaining_unlock || raw.remaining_matches || 0),
-  weeklyPriorityQuota: Number(raw.weeklyPriorityQuota || raw.weekly_priority_quota || raw.priority_quota || 0)
+  weeklyPriorityQuota: Number(raw.weeklyPriorityQuota || raw.weekly_priority_quota || raw.priority_quota || 0),
+  unlimitedUnlock: Boolean(raw.unlimitedUnlock || raw.unlimited_unlock)
 })
 
 const normalizeMembershipPlan = (raw: Record<string, any>): MembershipPlanDTO => ({
@@ -157,6 +181,17 @@ const normalizeMembershipPlan = (raw: Record<string, any>): MembershipPlanDTO =>
   features: Array.isArray(raw.features || raw.feature_list) ? (raw.features || raw.feature_list) : [],
   recommended: Boolean(raw.recommended || raw.is_recommended)
 })
+
+const defaultParentPlans = (): MembershipPlanDTO[] => [
+  {
+    id: 'parent_monthly_99',
+    name: '家长会员',
+    price: 9.9,
+    durationMonth: 1,
+    features: ['无限解锁老师联系方式', '优先匹配提醒', '发现页会员标识'],
+    recommended: true
+  }
+]
 
 const normalizeSettings = (raw: Record<string, any>): ParentSettingsDTO => ({
   notifications: {
@@ -255,7 +290,8 @@ export const parentApi = {
   async getMembershipPlans() {
     const payload = await request(ENDPOINTS.membershipPlans)
     const list = unwrapData(payload, [] as Record<string, any>[])
-    return Array.isArray(list) ? list.map(normalizeMembershipPlan) : []
+    if (!Array.isArray(list) || list.length === 0) return defaultParentPlans()
+    return list.map(normalizeMembershipPlan)
   },
 
   async subscribeMembership(planId: string, autoRenew: boolean) {
@@ -284,5 +320,10 @@ export const parentApi = {
 
   async deactivateAccount(confirmText: string) {
     await request(ENDPOINTS.settingsDeactivate, { method: 'POST', body: { confirm_text: confirmText } })
+  },
+
+  async getNotifications() {
+    const payload = await request(ENDPOINTS.notifications)
+    return unwrapData(payload, { matchUpdates: [], systemNotices: [] } as ParentNotificationsDTO)
   }
 }

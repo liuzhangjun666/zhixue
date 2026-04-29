@@ -64,6 +64,11 @@ const routes = [
     component: () => import('../views/parent/Reviews.vue')
   },
   {
+    path: '/parent/notifications',
+    name: 'ParentNotifications',
+    component: () => import('../views/parent/Notifications.vue')
+  },
+  {
     path: '/parent/vip',
     name: 'ParentVip',
     component: () => import('../views/parent/VipCenter.vue')

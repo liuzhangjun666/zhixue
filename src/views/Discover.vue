@@ -1,10 +1,12 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { MessageCircle, Search, SlidersHorizontal, Star, ClipboardPlus, MapPin } from 'lucide-vue-next'
+import { MessageCircle, Search, SlidersHorizontal, Star, ClipboardPlus, MapPin, Unlock } from 'lucide-vue-next'
 import { discoverApi, type DiscoverTeacherDTO } from '../api/discover'
 import { AUTH_TOKEN_STORAGE_KEY } from '../api/http'
 import { getStoredUser } from '../api/auth'
+import { parentApi } from '../api/parent'
+import Modal from '../components/Modal.vue'
 
 const router = useRouter()
 
@@ -15,11 +17,21 @@ const pageSize = 9
 const loading = ref(false)
 const feedback = ref('')
 
+const showUnlockConfirm = ref(false)
+const showUnlockSuccess = ref(false)
+const pendingTeacher = ref<DiscoverTeacherDTO | null>(null)
+const unlockContact = ref<{ phone: string; wechat: string; nickname: string }>({ phone: '', wechat: '', nickname: '' })
+const unlockConversationId = ref(0)
+
+const unlockInfo = ref({ planName: '体验用户', remainingUnlock: 0, unlimitedUnlock: false })
+const loadingUnlockInfo = ref(false)
+
 const filters = ref({
   keyword: '',
   subject: '',
   grade: '',
   city: '',
+  gender: '',
   mode: '',
   min_price: '',
   max_price: '',
@@ -40,6 +52,21 @@ const isParent = computed(() => currentUser.value?.role === 'parent')
 const isTeacher = computed(() => currentUser.value?.role === 'teacher')
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 
+const isMember = computed(() => Boolean(unlockInfo.value.unlimitedUnlock) || !['普通用户', '体验用户', '普通老师'].includes(unlockInfo.value.planName || ''))
+const unlockTone = computed(() => {
+  if (isMember.value) return 'purple'
+  if (unlockInfo.value.remainingUnlock > 0) return 'green'
+  return 'orange'
+})
+const unlockToneText = computed(() => {
+  if (!isLoggedIn.value) return '登录后可查看并解锁联系方式'
+  if (!isParent.value) return '老师账号可浏览，不可执行家长解锁操作'
+  if (unlockInfo.value.unlimitedUnlock) return '会员进行中 · 无限解锁'
+  if (isMember.value) return `会员进行中 · 剩余 ${unlockInfo.value.remainingUnlock} 次解锁`
+  if (unlockInfo.value.remainingUnlock > 0) return `今日剩余 ${unlockInfo.value.remainingUnlock} 次解锁`
+  return '今日解锁次数已用完'
+})
+
 const priceText = (item: DiscoverTeacherDTO) => {
   if (item.hourlyPriceMin == null && item.hourlyPriceMax == null) return '价格待沟通'
   if (item.hourlyPriceMin != null && item.hourlyPriceMax != null) return `${item.hourlyPriceMin}-${item.hourlyPriceMax} 元/小时`
@@ -50,6 +77,23 @@ const modeText = (mode: string) => {
   if (mode === 'online') return '线上'
   if (mode === 'offline') return '线下'
   return '线上/线下'
+}
+
+const fetchUnlockInfo = async () => {
+  if (!isLoggedIn.value || !isParent.value) return
+  loadingUnlockInfo.value = true
+  try {
+    const status = await parentApi.getMembershipStatus()
+    unlockInfo.value = {
+      planName: status.planName || '体验用户',
+      remainingUnlock: Number(status.remainingUnlock || 0),
+      unlimitedUnlock: Boolean(status.unlimitedUnlock)
+    }
+  } catch {
+    unlockInfo.value = { planName: '体验用户', remainingUnlock: 0, unlimitedUnlock: false }
+  } finally {
+    loadingUnlockInfo.value = false
+  }
 }
 
 const loadTeachers = async () => {
@@ -77,6 +121,7 @@ const clearFilters = () => {
     subject: '',
     grade: '',
     city: '',
+    gender: '',
     mode: '',
     min_price: '',
     max_price: '',
@@ -105,16 +150,48 @@ const goRequest = (teacher: DiscoverTeacherDTO) => {
   })
 }
 
-const contact = async (teacher: DiscoverTeacherDTO) => {
+const contact = (teacher: DiscoverTeacherDTO) => {
   if (!isLoggedIn.value) return goLogin()
   if (!isParent.value) return
+  pendingTeacher.value = teacher
+  showUnlockConfirm.value = true
+}
+
+const confirmContact = async () => {
+  if (!pendingTeacher.value) return
   feedback.value = ''
   try {
-    const result = await discoverApi.contactTeacher(teacher.teacherId)
-    router.push({ path: '/messages', query: { conversationId: String(result.conversationId) } })
+    const result = await discoverApi.contactTeacher(pendingTeacher.value.teacherId)
+    unlockContact.value = {
+      phone: result.contact?.phone || '',
+      wechat: result.contact?.wechat || '',
+      nickname: result.contact?.nickname || pendingTeacher.value.name
+    }
+    unlockConversationId.value = Number(result.conversationId || 0)
+    unlockInfo.value.remainingUnlock = Number(result.remainingUnlock || 0)
+    if (result.unlimitedUnlock) unlockInfo.value.unlimitedUnlock = true
+    showUnlockConfirm.value = false
+    showUnlockSuccess.value = true
   } catch (error) {
     feedback.value = (error as Error).message || '创建会话失败'
+    showUnlockConfirm.value = false
   }
+}
+
+const copyText = async (value: string) => {
+  if (!value) return
+  try {
+    await navigator.clipboard.writeText(value)
+    feedback.value = '已复制到剪贴板'
+  } catch {
+    feedback.value = '复制失败，请检查浏览器权限'
+  }
+}
+
+const goConversation = () => {
+  if (!unlockConversationId.value) return
+  showUnlockSuccess.value = false
+  router.push({ path: '/messages', query: { conversationId: String(unlockConversationId.value) } })
 }
 
 const turnPage = (nextPage: number) => {
@@ -122,7 +199,9 @@ const turnPage = (nextPage: number) => {
   loadTeachers()
 }
 
-onMounted(loadTeachers)
+onMounted(async () => {
+  await Promise.all([loadTeachers(), fetchUnlockInfo()])
+})
 </script>
 
 <template>
@@ -137,6 +216,16 @@ onMounted(loadTeachers)
         <small>位可联系老师</small>
       </div>
     </header>
+
+    <section class="unlock-status" :class="unlockTone">
+      <div>
+        <p class="unlock-title">解锁状态</p>
+        <p class="unlock-desc">{{ unlockToneText }}</p>
+      </div>
+      <button v-if="isParent && !unlockInfo.unlimitedUnlock && unlockInfo.remainingUnlock <= 0" class="btn-primary" @click="router.push('/parent/vip')">开通会员</button>
+      <button v-else-if="isLoggedIn && isParent" class="btn-ghost" :disabled="loadingUnlockInfo" @click="fetchUnlockInfo">刷新</button>
+      <button v-else class="btn-ghost" @click="goLogin">去登录</button>
+    </section>
 
     <section class="filter-panel">
       <div class="search-row">
@@ -169,6 +258,11 @@ onMounted(loadTeachers)
         <select v-model="filters.city" @change="search">
           <option value="">全部城市</option>
           <option v-for="item in cities" :key="item" :value="item">{{ item }}</option>
+        </select>
+        <select v-model="filters.gender" @change="search">
+          <option value="">不限性别</option>
+          <option value="female">女老师</option>
+          <option value="male">男老师</option>
         </select>
         <select v-model="filters.mode" @change="search">
           <option value="">全部方式</option>
@@ -218,6 +312,7 @@ onMounted(loadTeachers)
           <span><Star :size="14" /> {{ teacher.ratingAvg || '暂无' }} / {{ teacher.ratingCount }} 条</span>
           <span>{{ teacher.experienceYears }} 年经验</span>
           <span>{{ modeText(teacher.teachingMode) }}</span>
+          <span class="level-tag">{{ teacher.levelLabel || '免费' }}</span>
         </div>
 
         <p class="intro">{{ teacher.intro || '老师暂未填写简介' }}</p>
@@ -233,8 +328,8 @@ onMounted(loadTeachers)
             <button class="icon-btn" :disabled="isTeacher" title="发需求" @click="goRequest(teacher)">
               <ClipboardPlus :size="17" />
             </button>
-            <button class="icon-btn primary" :disabled="isTeacher" title="发消息" @click="contact(teacher)">
-              <MessageCircle :size="17" />
+            <button class="icon-btn primary" :disabled="isTeacher" title="解锁并发消息" @click="contact(teacher)">
+              <Unlock :size="17" />
             </button>
           </div>
         </div>
@@ -248,6 +343,36 @@ onMounted(loadTeachers)
       <span>{{ page }} / {{ totalPages }}</span>
       <button class="btn-ghost" :disabled="page >= totalPages" @click="turnPage(page + 1)">下一页</button>
     </footer>
+
+    <Modal :show="showUnlockConfirm" title="确认解锁联系方式" @close="showUnlockConfirm = false">
+      <div class="modal-body" v-if="pendingTeacher">
+        <p v-if="!unlockInfo.unlimitedUnlock">将消耗 <b>1 次</b> 解锁次数，用于联系 <b>{{ pendingTeacher.name }}</b>。</p>
+        <p v-else>你当前为家长会员，解锁 <b>{{ pendingTeacher.name }}</b> 不消耗次数。</p>
+        <p>解锁后会自动创建会话，并返回手机号/微信号。</p>
+      </div>
+      <template #footer>
+        <button class="btn-ghost" @click="showUnlockConfirm = false">取消</button>
+        <button class="btn-primary" @click="confirmContact">确认解锁</button>
+      </template>
+    </Modal>
+
+    <Modal :show="showUnlockSuccess" title="解锁成功" @close="showUnlockSuccess = false">
+      <div class="modal-body">
+        <p><strong>老师：</strong>{{ unlockContact.nickname || '老师' }}</p>
+        <p>
+          <strong>手机号：</strong>{{ unlockContact.phone || '未提供' }}
+          <button class="link-btn" @click="copyText(unlockContact.phone)">复制</button>
+        </p>
+        <p>
+          <strong>微信号：</strong>{{ unlockContact.wechat || '未提供' }}
+          <button class="link-btn" :disabled="!unlockContact.wechat" @click="copyText(unlockContact.wechat)">复制</button>
+        </p>
+      </div>
+      <template #footer>
+        <button class="btn-ghost" @click="showUnlockSuccess = false">稍后</button>
+        <button class="btn-primary" @click="goConversation">去聊天</button>
+      </template>
+    </Modal>
   </section>
 </template>
 
@@ -300,6 +425,7 @@ h1 {
   color: #6b7280;
 }
 
+.unlock-status,
 .filter-panel,
 .status-box {
   background: #fff;
@@ -307,6 +433,43 @@ h1 {
   border-radius: 8px;
   padding: 16px;
 }
+
+.unlock-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.unlock-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.unlock-desc {
+  margin: 0;
+  font-size: 14px;
+}
+
+.unlock-status.green {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+.unlock-status.green .unlock-desc { color: #166534; }
+
+.unlock-status.orange {
+  border-color: #fdba74;
+  background: #fff7ed;
+}
+.unlock-status.orange .unlock-desc { color: #c2410c; }
+
+.unlock-status.purple {
+  border-color: #c4b5fd;
+  background: #f5f3ff;
+}
+.unlock-status.purple .unlock-desc { color: #6d28d9; }
 
 .search-row {
   display: grid;
@@ -346,7 +509,7 @@ select {
 
 .filter-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin-top: 12px;
 }
@@ -440,6 +603,12 @@ select {
   font-size: 13px;
 }
 
+.level-tag {
+  border-radius: 999px;
+  background: #f3f4f6;
+  padding: 2px 8px;
+}
+
 .intro {
   min-height: 42px;
 }
@@ -492,6 +661,8 @@ select {
 .btn-primary {
   background: #0f766e;
   color: #fff;
+  min-height: 42px;
+  padding: 0 14px;
 }
 
 .btn-ghost {
@@ -544,6 +715,19 @@ button:disabled {
   gap: 12px;
 }
 
+.modal-body p {
+  margin: 0 0 8px;
+  color: #374151;
+}
+
+.link-btn {
+  border: 0;
+  background: transparent;
+  color: #0f766e;
+  margin-left: 8px;
+  cursor: pointer;
+}
+
 @media (max-width: 980px) {
   .teacher-grid,
   .filter-grid {
@@ -561,6 +745,7 @@ button:disabled {
     flex-direction: column;
   }
 
+  .unlock-status,
   .teacher-grid,
   .filter-grid {
     grid-template-columns: 1fr;

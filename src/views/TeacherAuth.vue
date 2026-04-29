@@ -30,8 +30,6 @@ const certUrl = ref('')
 const feedback = ref('')
 const errorText = ref('')
 const loading = ref(false)
-const subject = ref('')
-const exp = ref('')
 
 const targetPath = () => (typeof route.query.redirect === 'string' ? route.query.redirect : '/teacher-center')
 

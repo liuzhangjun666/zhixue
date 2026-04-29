@@ -1,5 +1,6 @@
 ﻿<script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { teacherApi, type TeacherNotificationsDTO } from '../../api/teacher'
 
 type NotificationTab = 'unlock' | 'match' | 'review' | 'complaint' | 'system'
@@ -8,6 +9,7 @@ const loading = ref(false)
 const actioningId = ref<number | null>(null)
 const feedback = ref('')
 const tab = ref<NotificationTab>('unlock')
+const router = useRouter()
 
 const data = ref<TeacherNotificationsDTO>({
   unlockRequests: [],
@@ -85,6 +87,18 @@ const submitAppeal = async (id: number) => {
   }
 }
 
+const goToMatch = (item: { matchId?: number; requestId?: number; id?: number }) => {
+  const matchId = Number(item.matchId || item.id || 0)
+  const requestId = Number(item.requestId || 0)
+  router.push({
+    path: '/teacher-center/match-pool',
+    query: {
+      matchId: matchId > 0 ? String(matchId) : undefined,
+      requestId: requestId > 0 ? String(requestId) : undefined
+    }
+  })
+}
+
 onMounted(load)
 </script>
 
@@ -121,6 +135,7 @@ onMounted(load)
           <div class="actions">
             <button class="btn" :disabled="actioningId === item.id" @click="acceptUnlock(item.id)">{{ actioningId === item.id ? '处理中...' : '同意' }}</button>
             <button class="btn-danger" :disabled="actioningId === item.id" @click="rejectUnlock(item.id)">拒绝</button>
+            <button class="btn-ghost" @click="goToMatch(item)">查看匹配</button>
           </div>
         </template>
 
@@ -136,6 +151,7 @@ onMounted(load)
 
         <template v-else>
           <p class="desc">{{ item.content }}</p>
+          <button v-if="tab === 'match'" class="btn-ghost" @click="goToMatch(item)">查看匹配</button>
         </template>
       </article>
     </div>
@@ -169,5 +185,6 @@ onMounted(load)
 .btn, .btn-danger { border: none; border-radius: 10px; padding: 10px 12px; cursor: pointer; font-weight: 600; }
 .btn { background: #10a881; color: #fff; }
 .btn-danger { background: #fee2e2; color: #b91c1c; }
+.btn-ghost { border: none; border-radius: 10px; padding: 10px 12px; cursor: pointer; font-weight: 600; background: #eef2ff; color: #4338ca; }
 .feedback { margin: 0; border: 1px solid #fecaca; background: #fef2f2; color: #b91c1c; border-radius: 12px; padding: 12px; }
 </style>

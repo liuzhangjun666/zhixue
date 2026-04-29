@@ -1,8 +1,6 @@
 const API_BASE_URL = (process.env.API_BASE_URL || 'http://localhost:8000').replace(/\/+$/, '')
 
-const now = Date.now().toString()
-const rand = Math.floor(Math.random() * 1000)
-const suffix = `${now.slice(-7)}${rand}`.slice(0, 8)
+const suffix = String(Date.now() + Math.floor(Math.random() * 1000000)).slice(-9)
 const parentPhone = `13${suffix.padStart(9, '0')}`.slice(0, 11)
 const teacherPhone = `15${suffix.padStart(9, '9')}`.slice(0, 11)
 const password = 'Pass1234'

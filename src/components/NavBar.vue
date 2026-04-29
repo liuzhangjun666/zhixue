@@ -9,6 +9,7 @@ import { logout } from '../api/auth'
 const router = useRouter()
 const route = useRoute()
 const currentPath = computed(() => route.path)
+const SYSTEM_NOTICE_READ_KEY = 'zhixue_system_notice_read'
 
 const isLoggedIn = ref(false)
 const storedUser = ref<{ id?: number | string; role?: string } | null>(null)
@@ -44,14 +45,18 @@ const userRole = computed(() => {
 })
 
 const userId = computed(() => Number(storedUser.value?.id || 0))
-const discoverPath = computed(() => (userRole.value === 'teacher' ? '/teacher-center/match-pool' : '/parent/requests'))
+const discoverPath = computed(() => (userRole.value === 'teacher' ? '/teacher-center/match-pool' : '/discover'))
 
 const unreadCount = ref(0)
 const showNotifications = ref(false)
-const systemNotifications = ref([
-  { id: 1, title: '系统通知', content: '欢迎使用知学空间，请完善您的个人资料。', time: '刚刚', read: false },
-  { id: 2, title: '课程提醒', content: '您有一节试听课即将开始。', time: '2小时前', read: false }
-])
+const getInitialNotifications = () => {
+  const read = typeof window !== 'undefined' && window.localStorage.getItem(SYSTEM_NOTICE_READ_KEY) === '1'
+  return [
+    { id: 1, title: '系统通知', content: '欢迎使用知学空间，请完善您的个人资料。', time: '刚刚', read },
+    { id: 2, title: '课程提醒', content: '您有一节试听课即将开始。', time: '2小时前', read }
+  ]
+}
+const systemNotifications = ref(getInitialNotifications())
 const systemUnreadCount = computed(() => systemNotifications.value.filter((n) => !n.read).length)
 
 let logoutToastTimer: number | null = null
@@ -61,6 +66,12 @@ const WS_BASE_URL = API_BASE_URL ? new URL(API_BASE_URL, window.location.origin)
 const showUserMenu = ref(false)
 const logoutToastVisible = ref(false)
 const logoutToastText = ref('')
+
+const persistSystemNotificationRead = () => {
+  if (typeof window === 'undefined') return
+  const hasUnread = systemNotifications.value.some((item) => !item.read)
+  window.localStorage.setItem(SYSTEM_NOTICE_READ_KEY, hasUnread ? '0' : '1')
+}
 
 const toggleSystemNotifications = () => {
   showNotifications.value = !showNotifications.value
@@ -202,7 +213,7 @@ onUnmounted(() => {
         </div>
         <ul class="nav-menu">
           <li><router-link to="/" :class="{ active: currentPath === '/' }">首页</router-link></li>
-          <li><router-link :to="discoverPath" :class="{ active: currentPath.includes('/match-pool') || currentPath.includes('/parent/requests') }">发现</router-link></li>
+          <li><router-link :to="discoverPath" :class="{ active: currentPath.includes('/match-pool') || currentPath.includes('/discover') }">发现</router-link></li>
           <li>
             <router-link
               to="/messages"
