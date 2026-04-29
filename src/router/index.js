@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { AUTH_TOKEN_STORAGE_KEY, AUTH_USER_STORAGE_KEY } from '../api/http'
 
 const routes = [
   {
@@ -30,40 +31,37 @@ const routes = [
   {
     path: '/parent-center',
     name: 'ParentCenter',
-    component: () => import('../views/ParentCenter.vue'),
-    redirect: '/parent-center/edit',
-    children: [
-      {
-        path: 'edit',
-        name: 'ParentEdit',
-        component: () => import('../views/parent/EditProfile.vue')
-      },
-      {
-        path: 'requests',
-        name: 'ParentRequests',
-        component: () => import('../views/parent/Requests.vue')
-      },
-      {
-        path: 'requests/:id',
-        name: 'ParentRequestDetail',
-        component: () => import('../views/parent/RequestDetail.vue')
-      },
-      {
-        path: 'reviews',
-        name: 'ParentReviews',
-        component: () => import('../views/parent/Reviews.vue')
-      },
-      {
-        path: 'vip',
-        name: 'ParentVip',
-        component: () => import('../views/parent/VipCenter.vue')
-      },
-      {
-        path: 'settings',
-        name: 'ParentSettings',
-        component: () => import('../views/parent/Settings.vue')
-      }
-    ]
+    component: () => import('../views/ParentCenter.vue')
+  },
+  {
+    path: '/parent/edit',
+    name: 'ParentEdit',
+    component: () => import('../views/parent/EditProfile.vue')
+  },
+  {
+    path: '/parent/requests',
+    name: 'ParentRequests',
+    component: () => import('../views/parent/Requests.vue')
+  },
+  {
+    path: '/parent/requests/:id',
+    name: 'ParentRequestDetail',
+    component: () => import('../views/parent/RequestDetail.vue')
+  },
+  {
+    path: '/parent/reviews',
+    name: 'ParentReviews',
+    component: () => import('../views/parent/Reviews.vue')
+  },
+  {
+    path: '/parent/vip',
+    name: 'ParentVip',
+    component: () => import('../views/parent/VipCenter.vue')
+  },
+  {
+    path: '/parent/settings',
+    name: 'ParentSettings',
+    component: () => import('../views/parent/Settings.vue')
   },
   {
     path: '/teacher-center',
@@ -123,6 +121,52 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+const authPages = new Set(['/login', '/register', '/teacher-auth'])
+const sharedProtectedPrefixes = ['/messages']
+const parentProtectedPrefixes = ['/parent', '/parent-center']
+const teacherProtectedPrefixes = ['/teacher', '/teacher-center']
+
+const hasPrefix = (path, prefixes) => prefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))
+
+const getStoredRole = () => {
+  if (typeof window === 'undefined') return ''
+  const raw = window.localStorage.getItem(AUTH_USER_STORAGE_KEY)
+  if (!raw) return ''
+  try {
+    const parsed = JSON.parse(raw)
+    return String(parsed?.role || '')
+  } catch {
+    return ''
+  }
+}
+
+router.beforeEach((to) => {
+  const token = typeof window !== 'undefined' ? window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '' : ''
+  const role = getStoredRole()
+
+  const inParentArea = hasPrefix(to.path, parentProtectedPrefixes)
+  const inTeacherArea = hasPrefix(to.path, teacherProtectedPrefixes)
+  const inSharedProtectedArea = hasPrefix(to.path, sharedProtectedPrefixes)
+  const needsAuth = inParentArea || inTeacherArea || inSharedProtectedArea
+
+  if (!token && needsAuth) {
+    return inTeacherArea ? '/teacher-auth' : '/login'
+  }
+
+  if (token && authPages.has(to.path)) {
+    return role === 'teacher' ? '/teacher-center' : '/parent-center'
+  }
+
+  if (token && role === 'parent' && inTeacherArea) {
+    return '/parent-center'
+  }
+  if (token && role === 'teacher' && inParentArea) {
+    return '/teacher-center'
+  }
+
+  return true
 })
 
 export default router

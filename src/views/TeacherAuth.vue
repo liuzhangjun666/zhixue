@@ -1,63 +1,92 @@
-<script setup>
+﻿<script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import GlassCard from '../components/GlassCard.vue'
-import { teacherApi } from '../api/teacher'
+import { setAuthSession, teacherLogin, teacherRegister } from '../api/auth'
 
 const router = useRouter()
 const currentStep = ref(1)
+const isLoginMode = ref(false)
 
 const phone = ref('')
 const code = ref('')
 const password = ref('')
-const city = ref('上海')
 
 const nickname = ref('')
 const gender = ref('')
-const certUrl = ref('')
-const feedback = ref('')
+const subject = ref('')
+const exp = ref('')
+const loading = ref(false)
+const errorText = ref('')
 
-const nextStep = async () => {
-  feedback.value = ''
-  if (currentStep.value === 1) {
-    try {
-      await teacherApi.register({
-        phone: phone.value,
-        password: password.value,
-        code: code.value,
-        nickname: nickname.value || '新老师',
-        city: city.value
-      })
-    } catch (error) {
-      try {
-        await teacherApi.login(phone.value, password.value)
-      } catch (e) {
-        feedback.value = e?.message || error?.message || '老师注册失败'
-        return
-      }
-    }
+const switchToLogin = () => {
+  isLoginMode.value = true
+  currentStep.value = 1
+  errorText.value = ''
+}
+
+const switchToRegister = () => {
+  isLoginMode.value = false
+  currentStep.value = 1
+  errorText.value = ''
+}
+
+const nextStep = () => {
+  if (currentStep.value === 1 && (!phone.value || !password.value)) {
+    errorText.value = '请填写手机号和密码'
+    return
   }
-
-  if (currentStep.value === 3 && certUrl.value.trim()) {
-    try {
-      await teacherApi.submitVerification('teacher_license', certUrl.value.trim())
-    } catch (error) {
-      feedback.value = error?.message || '认证材料提交失败'
-      return
-    }
+  if (currentStep.value === 2 && (!nickname.value || !subject.value)) {
+    errorText.value = '请填写姓名和科目'
+    return
   }
-
+  errorText.value = ''
   if (currentStep.value < 4) {
     currentStep.value++
   }
 }
 
 const finishRegister = async () => {
-  if (!teacherApi.getToken()) {
-    feedback.value = '登录状态失效，请重新登录'
+  loading.value = true
+  errorText.value = ''
+  try {
+    const data = await teacherRegister({
+      phone: phone.value.trim(),
+      password: password.value,
+      nickname: nickname.value.trim(),
+      subject: subject.value.trim(),
+      experience: exp.value.trim()
+    })
+    if (!data?.token || !data?.user) throw new Error('注册返回数据不完整')
+    setAuthSession(data.token, data.user)
+    router.push('/teacher-center')
+  } catch (error) {
+    errorText.value = (error && error.message) || '提交失败，请稍后重试'
+  } finally {
+    loading.value = false
+  }
+}
+
+const handleTeacherLogin = async () => {
+  if (!phone.value || !password.value) {
+    errorText.value = '请填写手机号和密码'
     return
   }
-  router.push('/teacher-center')
+  loading.value = true
+  errorText.value = ''
+  try {
+    const data = await teacherLogin({
+      phone: phone.value.trim(),
+      password: password.value
+    })
+    if (!data?.token || !data?.user) throw new Error('登录返回数据不完整')
+    setAuthSession(data.token, data.user)
+    router.push('/teacher-center')
+  } catch (error) {
+    errorText.value = (error && error.message) || '登录失败，请稍后重试'
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 
@@ -83,6 +112,33 @@ const finishRegister = async () => {
 
     <div class="form-section">
       <GlassCard maxWidth="420px">
+        <div class="mode-switch mb-4">
+          <button class="mode-btn" :class="{ active: !isLoginMode }" @click="switchToRegister">老师入驻</button>
+          <button class="mode-btn" :class="{ active: isLoginMode }" @click="switchToLogin">已有账号登录</button>
+        </div>
+
+        <div v-if="isLoginMode" class="step-content">
+          <form @submit.prevent="handleTeacherLogin">
+            <div class="input-group">
+              <div class="input-wrapper">
+                <input type="tel" v-model="phone" class="input-field" placeholder="手机号" required>
+              </div>
+            </div>
+
+            <div class="input-group">
+              <div class="input-wrapper">
+                <input type="password" v-model="password" class="input-field" placeholder="密码" required>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-teacher w-100 mt-4" :disabled="loading">
+              {{ loading ? '登录中...' : '登录老师中心' }}
+            </button>
+          </form>
+        </div>
+
+        <template v-else>
+        <!-- 步骤指示器 -->
         <div class="step-indicator mb-4">
           <div class="step" :class="{ active: currentStep >= 1, completed: currentStep > 1 }">
             <div class="step-dot"></div>
@@ -121,12 +177,6 @@ const finishRegister = async () => {
               </div>
             </div>
 
-            <div class="input-group">
-              <div class="input-wrapper">
-                <input type="text" v-model="city" class="input-field" placeholder="所在城市" required>
-              </div>
-            </div>
-
             <button type="submit" class="btn btn-teacher w-100 mt-4">下一步</button>
           </form>
         </div>
@@ -155,6 +205,18 @@ const finishRegister = async () => {
               </select>
             </div>
 
+            <div class="input-group">
+              <div class="input-wrapper">
+                <input type="text" v-model="subject" class="input-field" placeholder="擅长科目（如数学）" required>
+              </div>
+            </div>
+
+            <div class="input-group">
+              <div class="input-wrapper">
+                <input type="text" v-model="exp" class="input-field" placeholder="教学经验（如3年）">
+              </div>
+            </div>
+            
             <button type="submit" class="btn btn-teacher w-100 mt-4">下一步</button>
           </form>
         </div>
@@ -164,7 +226,7 @@ const finishRegister = async () => {
             <div class="cert-icon">📄</div>
             <p class="cert-title">上传教师资格证或从业证明</p>
             <p class="cert-desc">选填，提交后可提升信任度和曝光权重</p>
-            <input v-model="certUrl" class="input-field mt-3" type="text" placeholder="粘贴证书图片/文件地址（可选）">
+            <button class="btn btn-ghost btn-teacher-ghost mt-3">选择文件</button>
             <p class="upload-hint mt-2">支持 JPG、PNG、PDF，不超过 5MB</p>
           </div>
 
@@ -173,16 +235,23 @@ const finishRegister = async () => {
         </div>
 
         <div v-if="currentStep === 4" class="step-content text-center">
-          <div class="success-icon mb-3">✓</div>
-          <h2 class="mb-2">入驻成功</h2>
-          <p class="text-sub mb-4">基础资料已提交，去个人中心完善更多信息，提升接单效率。</p>
-          <button @click="finishRegister" class="btn btn-teacher w-100">前往个人中心</button>
+          <div class="success-icon mb-3">✅</div>
+          <h2 class="mb-2">入驻成功！</h2>
+          <p class="text-sub mb-4">您的资料已提交，去完善更多信息提升曝光率吧。</p>
+          <button @click="finishRegister" class="btn btn-teacher w-100" :disabled="loading">
+            {{ loading ? '提交中...' : '前往个人中心' }}
+          </button>
         </div>
+        </template>
 
-        <div v-if="currentStep === 1" class="text-center mt-4 text-sub">
-          已有老师账号？<router-link to="/login" class="text-teacher">立即登录</router-link>
+        <p v-if="errorText" class="error-text mt-3">{{ errorText }}</p>
+        
+        <div v-if="!isLoginMode && currentStep === 1" class="text-center mt-4 text-sub">
+          已有老师账号？ <button class="inline-link-btn text-teacher" @click="switchToLogin">立即登录</button>
         </div>
-        <p v-if="feedback" class="feedback">{{ feedback }}</p>
+        <div v-if="isLoginMode" class="text-center mt-4 text-sub">
+          还没有老师账号？ <button class="inline-link-btn text-teacher" @click="switchToRegister">去入驻</button>
+        </div>
       </GlassCard>
     </div>
   </div>
@@ -288,6 +357,29 @@ const finishRegister = async () => {
   background: var(--color-teacher);
 }
 
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.mode-btn {
+  border: 1px solid var(--color-border);
+  background: white;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--color-text-sub);
+}
+
+.mode-btn.active {
+  border-color: var(--color-teacher);
+  color: var(--color-teacher);
+  background: rgba(16, 168, 129, 0.08);
+}
+
+/* 注册特有样式 */
 .w-100 { width: 100%; }
 .text-center { text-align: center; }
 
@@ -365,5 +457,16 @@ const finishRegister = async () => {
 .border-0 { border: none !important; }
 
 .success-icon { font-size: 64px; }
-.feedback { margin-top: 12px; color: #b91c1c; font-size: 13px; text-align: center; }
+.error-text {
+  color: #e11d48;
+  font-size: 13px;
+}
+
+.inline-link-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-size: inherit;
+}
 </style>

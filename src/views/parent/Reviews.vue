@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { ArrowLeft } from 'lucide-vue-next'
 import { parentApi, type ReviewDTO } from '../../api/parent'
+
+const router = useRouter()
 
 const reviews = ref<ReviewDTO[]>([])
 
@@ -72,9 +76,14 @@ onMounted(loadReviews)
 <template>
   <section class="module-page">
     <header class="module-header">
-      <div>
-        <h1>我的评价</h1>
-        <p>查看历史评价并补充家长反馈。</p>
+      <div class="header-left">
+        <button class="btn-icon-back" @click="router.push('/parent-center')">
+          <ArrowLeft :size="20" />
+        </button>
+        <div>
+          <h1>我的评价</h1>
+          <p>查看历史评价并补充家长反馈。</p>
+        </div>
       </div>
       <div class="score-pill">综合评分 {{ averageRating }}</div>
     </header>
@@ -164,6 +173,31 @@ onMounted(loadReviews)
   border: 1px solid #e5e7eb;
   border-radius: 18px;
   padding: 20px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.btn-icon-back {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #F5F5F7;
+  color: #1D1D1F;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-icon-back:hover {
+  background: #E5E5EA;
+  transform: translateX(-2px);
 }
 
 h1 {

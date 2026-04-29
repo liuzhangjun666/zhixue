@@ -1,13 +1,27 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
-import { Bell, User } from 'lucide-vue-next'
+import { useRoute, useRouter } from 'vue-router'
+import { Bell, User, LogOut } from 'lucide-vue-next'
+import { AUTH_TOKEN_STORAGE_KEY, AUTH_USER_STORAGE_KEY, request, unwrapData } from '../api/http'
+import { logout } from '../api/auth'
+
+const router = useRouter()
 
 const route = useRoute()
 const currentPath = computed(() => route.path)
 
 const isLoggedIn = computed(() => !['/login', '/register', '/teacher-auth'].includes(route.path))
 const userRole = computed(() => {
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = window.localStorage.getItem(AUTH_USER_STORAGE_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed?.role === 'teacher') return 'teacher'
+        if (parsed?.role === 'parent') return 'parent'
+      }
+    } catch {}
+  }
   if (route.path.startsWith('/teacher')) return 'teacher'
   return 'parent'
 })
@@ -35,11 +49,26 @@ const closeNotifications = (e: Event) => {
   if (!(e.target as Element).closest('.notification-container')) {
     showNotifications.value = false
   }
+  if (!(e.target as Element).closest('.user-menu-container')) {
+    showUserMenu.value = false
+  }
+}
+
+const showUserMenu = ref(false)
+
+const toggleUserMenu = () => {
+  showUserMenu.value = !showUserMenu.value
+}
+
+const handleLogout = () => {
+  showUserMenu.value = false
+  logout().finally(() => {
+    router.push('/login')
+  })
 }
 
 const fetchUnreadCount = async () => {
   if (!isLoggedIn.value) return
-  const userId = userRole.value === 'teacher' ? 2 : 1
   try {
     const res = await fetch(`http://localhost:8000/api/messages/unread-count?userId=${userId}`)
     const { data } = await res.json()
@@ -120,9 +149,17 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div class="user-profile">
-              <div class="avatar">
+            <div class="user-menu-container">
+              <div class="avatar" @click.stop="toggleUserMenu">
                 <User class="avatar-icon" />
+              </div>
+
+              <!-- 用户下拉菜单 -->
+              <div v-if="showUserMenu" class="user-dropdown">
+                <div class="user-dropdown-item logout" @click="handleLogout">
+                  <LogOut class="dropdown-item-icon" />
+                  <span>退出登录</span>
+                </div>
               </div>
             </div>
           </div>
@@ -148,7 +185,7 @@ onUnmounted(() => {
   max-width: var(--max-width);
   margin: 0 auto;
   height: 100%;
-  padding: 0 48px;
+  padding: 0 var(--page-padding);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -390,8 +427,8 @@ onUnmounted(() => {
   color: #a1a1a6;
 }
 
-.user-profile {
-  cursor: pointer;
+.user-menu-container {
+  position: relative;
 }
 
 .avatar {
@@ -405,6 +442,7 @@ onUnmounted(() => {
   justify-content: center;
   color: #86868B;
   transition: all 0.2s;
+  cursor: pointer;
 }
 
 .avatar:hover {
@@ -415,6 +453,69 @@ onUnmounted(() => {
 .avatar-icon {
   width: 20px;
   height: 20px;
+}
+
+/* 用户下拉菜单 */
+.user-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  width: 160px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.12);
+  border: 1px solid rgba(0,0,0,0.05);
+  margin-top: 12px;
+  z-index: 200;
+  overflow: hidden;
+  animation: dropdownFadeIn 0.15s ease;
+}
+
+@keyframes dropdownFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.user-dropdown::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  right: 12px;
+  width: 12px;
+  height: 12px;
+  background: white;
+  transform: rotate(45deg);
+  border-left: 1px solid rgba(0,0,0,0.05);
+  border-top: 1px solid rgba(0,0,0,0.05);
+}
+
+.user-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #1d1d1f;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.user-dropdown-item:hover {
+  background: #f5f5f7;
+}
+
+.user-dropdown-item.logout {
+  color: #FF3B30;
+}
+
+.user-dropdown-item.logout:hover {
+  background: #FFF1F0;
+}
+
+.dropdown-item-icon {
+  width: 18px;
+  height: 18px;
 }
 
 @media (max-width: 768px) {

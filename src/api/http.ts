@@ -1,6 +1,8 @@
-const API_BASE_URL = (
+export const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '')
 ).trim()
+export const AUTH_TOKEN_STORAGE_KEY = 'zhixue_auth_token'
+export const AUTH_USER_STORAGE_KEY = 'zhixue_auth_user'
 
 type RequestMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
@@ -13,7 +15,7 @@ interface RequestOptions {
 const trimSlash = (value: string) => value.replace(/\/+$/, '')
 const stripLeadingSlash = (value: string) => value.replace(/^\/+/, '')
 
-const buildUrl = (path: string) => {
+export const buildApiUrl = (path: string) => {
   if (!API_BASE_URL) return path
   return `${trimSlash(API_BASE_URL)}/${stripLeadingSlash(path)}`
 }
@@ -39,13 +41,20 @@ export const request = async <T = unknown>(path: string, options: RequestOptions
     Accept: 'application/json',
     ...(options.headers || {})
   }
+  const token =
+    typeof window !== 'undefined' && window.localStorage
+      ? window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || ''
+      : ''
+  if (token && !headers.Authorization) {
+    headers.Authorization = `Bearer ${token}`
+  }
 
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
   if (!isFormData && options.body !== undefined) {
     headers['Content-Type'] = 'application/json'
   }
 
-  const response = await fetch(buildUrl(path), {
+  const response = await fetch(buildApiUrl(path), {
     method,
     credentials: 'include',
     headers,

@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { ArrowLeft } from 'lucide-vue-next'
 import { parentApi, type MembershipPlanDTO } from '../../api/parent'
+
+const router = useRouter()
 
 const currentPlan = ref({
   name: '普通用户',
@@ -60,9 +64,14 @@ onMounted(loadMembershipData)
 <template>
   <section class="module-page">
     <header class="module-header">
-      <div>
-        <h1>会员中心</h1>
-        <p>管理会员权益，按家庭需求选择套餐。</p>
+      <div class="header-left">
+        <button class="btn-icon-back" @click="router.push('/parent-center')">
+          <ArrowLeft :size="20" />
+        </button>
+        <div>
+          <h1>会员中心</h1>
+          <p>管理会员权益，按家庭需求选择套餐。</p>
+        </div>
       </div>
       <span class="tag-current">当前：{{ currentPlan.name }}</span>
     </header>
@@ -141,6 +150,31 @@ onMounted(loadMembershipData)
   border: 1px solid #e5e7eb;
   border-radius: 18px;
   padding: 20px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.btn-icon-back {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #F5F5F7;
+  color: #1D1D1F;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-icon-back:hover {
+  background: #E5E5EA;
+  transform: translateX(-2px);
 }
 
 h1 {

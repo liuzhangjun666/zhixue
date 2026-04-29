@@ -38,6 +38,7 @@
   
   /* 布局与圆角 */
   --max-width: 1200px;
+  --page-padding: 24px;
   --radius-card: 16px;
   --radius-btn: 10px;
   --radius-input: 10px;

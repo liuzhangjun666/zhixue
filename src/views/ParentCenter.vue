@@ -54,17 +54,17 @@ interface MenuItem {
 }
 
 const menuItems: MenuItem[] = [
-  { title: '编辑资料', icon: Edit3, path: '/parent-center/edit' },
-  { title: '我的请求', icon: ClipboardList, path: '/parent-center/requests', badge: 2 },
-  { title: '我的评价', icon: Star, path: '/parent-center/reviews', suffix: '共 12 条' },
+  { title: '编辑资料', icon: Edit3, path: '/parent/edit' },
+  { title: '我的请求', icon: ClipboardList, path: '/parent/requests', badge: 2 },
+  { title: '我的评价', icon: Star, path: '/parent/reviews', suffix: '共 12 条' },
   {
     title: '会员中心',
     icon: Crown,
-    path: '/parent-center/vip',
+    path: '/parent/vip',
     iconClass: 'icon-primary',
     textClass: 'text-primary fw-bold'
   },
-  { title: '账户设置', icon: Settings, path: '/parent-center/settings' }
+  { title: '账户设置', icon: Settings, path: '/parent/settings' }
 ]
 
 const handleNavigate = (path: string) => {
@@ -75,31 +75,31 @@ const handleNavigate = (path: string) => {
 </script>
 
 <template>
-  <div class="apple-dashboard-layout container">
-    <aside class="sidebar">
-      <!-- 用户信息卡片 -->
-      <div class="apple-card mb-4">
-        <div class="user-profile">
-          <div class="avatar-large" @click="triggerAvatarUpload" style="cursor: pointer;">
-            <img :src="userProfile?.avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix'" alt="avatar" />
-            <div class="avatar-hover-overlay">更换头像</div>
-            <input type="file" ref="fileInput" accept="image/png, image/jpeg" style="display: none" @change="onFileChange" />
-          </div>
-          <div class="user-info">
-            <h2 class="user-name">{{ userProfile?.parentName || '加载中...' }} <span class="badge-verified">已认证</span></h2>
-            <div class="user-meta mt-1">
-              <span>诚信评分：4.9</span>
-            </div>
-            <div class="user-meta mt-1">
-              <span>入驻时间：2025-01-10</span>
-            </div>
-          </div>
-          <button class="btn-ghost-edit" @click="handleNavigate('/parent-center/edit')">编辑</button>
+  <div class="apple-dashboard-layout">
+    <!-- 顶部用户信息区 -->
+    <div class="apple-card mb-4 w-full">
+      <div class="user-profile">
+        <div class="avatar-large" @click="triggerAvatarUpload" style="cursor: pointer;">
+          <img :src="userProfile?.avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix'" alt="avatar" />
+          <div class="avatar-hover-overlay">更换头像</div>
+          <input type="file" ref="fileInput" accept="image/png, image/jpeg" style="display: none" @change="onFileChange" />
         </div>
+        <div class="user-info">
+          <h2 class="user-name">{{ userProfile?.parentName || '加载中...' }} <span class="badge-verified">已认证</span></h2>
+          <div class="user-meta mt-1">
+            <span>诚信评分：4.9</span>
+            <span class="mx-2">|</span>
+            <span>入驻时间：2025-01-10</span>
+          </div>
+        </div>
+        <button class="btn-ghost-edit" @click="handleNavigate('/parent/edit')">编辑资料</button>
       </div>
-      
+    </div>
+    
+    <!-- 核心功能区域：左侧 VIP，右侧菜单 -->
+    <div class="dashboard-grid">
       <!-- 黑金会员卡片 -->
-      <div class="dark-gold-vip-card mb-4">
+      <div class="dark-gold-vip-card h-full">
         <div class="vip-header">
           <div>
             <div class="vip-title"><Crown class="gold-icon" /> 粉钻会员</div>
@@ -116,44 +116,25 @@ const handleNavigate = (path: string) => {
         </div>
       </div>
 
-      <!-- 功能菜单 -->
-      <div class="apple-card menu-card">
+      <!-- 功能入口网格 -->
+      <div class="apple-card menu-card h-full">
         <h3 class="menu-title mb-3">功能菜单</h3>
-        <ul class="menu-list">
-          <li
+        <div class="menu-grid">
+          <div
             v-for="item in menuItems" 
             :key="item.title"
+            class="menu-grid-item"
+            @click="handleNavigate(item.path)"
           >
-            <button
-              type="button"
-              class="menu-item"
-              :class="{ active: route.path === item.path }"
-              @click="handleNavigate(item.path)"
-            >
-              <div class="menu-left">
-                <component :is="item.icon" class="menu-icon" :class="item.iconClass" />
-                <span :class="item.textClass">{{ item.title }}</span>
-              </div>
-
-              <div class="menu-right" v-if="item.badge || item.suffix">
-                <span v-if="item.badge" class="badge-red-smooth">{{ item.badge }}</span>
-                <span v-if="item.suffix" class="text-meta">{{ item.suffix }}</span>
-                <ChevronRight class="chevron-icon" :class="item.iconClass" />
-              </div>
-              <ChevronRight v-else class="chevron-icon" :class="item.iconClass" />
-            </button>
-          </li>
-        </ul>
+            <div class="menu-item-icon-wrapper" :class="item.iconClass">
+              <component :is="item.icon" class="menu-item-icon" />
+            </div>
+            <span class="menu-item-title" :class="item.textClass">{{ item.title }}</span>
+            <span v-if="item.badge" class="menu-item-badge">{{ item.badge }}</span>
+          </div>
+        </div>
       </div>
-    </aside>
-
-    <main class="main-content">
-      <router-view v-slot="{ Component }">
-        <transition name="fade" mode="out-in">
-          <component :is="Component" />
-        </transition>
-      </router-view>
-    </main>
+    </div>
   </div>
 </template>
 
@@ -167,27 +148,21 @@ body {
 <style scoped>
 .apple-dashboard-layout {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
   gap: 24px;
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 24px;
+  width: 100%;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  align-items: flex-start;
 }
 
-.sidebar {
-  display: flex;
-  flex-direction: column;
-  width: 320px;
-  flex-shrink: 0;
-}
+.w-full { width: 100%; }
+.mx-2 { margin: 0 12px; }
+.h-full { height: 100%; }
 
-.main-content {
-  flex-grow: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  min-height: 400px;
 }
 
 /* 路由切换动画 */
@@ -419,120 +394,79 @@ body {
 }
 
 /* 右侧菜单 */
-.menu-card {
-  padding: 24px 16px;
+/* 功能入口网格 */
+.menu-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 20px;
+  padding: 8px;
 }
 
-.menu-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #1D1D1F;
-  padding: 0 16px;
-}
-
-.menu-list {
+.menu-grid-item {
   display: flex;
   flex-direction: column;
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.menu-item {
-  display: flex;
-  width: 100%;
-  border: none;
-  background: transparent;
-  text-align: left;
-  justify-content: space-between;
   align-items: center;
-  height: 56px;
-  padding: 0 16px;
-  border-radius: 12px;
+  justify-content: center;
+  padding: 24px 16px;
+  background: #F9F9FB;
+  border-radius: 16px;
   cursor: pointer;
-  transition: all 0.2s ease;
-  transform-origin: center;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  border: 1px solid transparent;
 }
 
-.menu-item:hover {
-  background: #F3F4F6;
+.menu-grid-item:hover {
+  background: #FFFFFF;
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.06);
+  border-color: #E5E5EA;
 }
 
-.menu-item:active {
-  transform: scale(0.98);
-}
-
-.menu-item.active {
-  background: rgba(94, 92, 230, 0.08); /* 极淡的紫灰色 */
-}
-
-.menu-item.active .menu-icon,
-.menu-item.active .chevron-icon,
-.menu-item.active span:not(.badge-red-smooth):not(.text-meta) {
-  color: #5E5CE6 !important;
-}
-
-.menu-left {
+.menu-item-icon-wrapper {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: white;
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-size: 15px;
-  color: #1D1D1F;
-  font-weight: 500;
-}
-
-.menu-icon {
-  width: 20px;
-  height: 20px;
-  color: #6B7280;
-}
-
-.chevron-icon {
-  width: 18px;
-  height: 18px;
-  color: #9CA3AF;
-}
-
-.menu-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.text-meta {
-  font-size: 14px;
+  justify-content: center;
+  margin-bottom: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
   color: #86868B;
 }
 
-.icon-primary {
-  color: #5E5CE6 !important;
+.menu-item-icon {
+  width: 24px;
+  height: 24px;
 }
 
-.text-primary {
-  color: #5E5CE6;
+.menu-item-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: #1D1D1F;
 }
 
-.fw-bold {
-  font-weight: 600;
-}
-
-.badge-red-smooth {
+.menu-item-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
   background: #FF3B30;
   color: white;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 10px;
-  min-width: 24px;
-  text-align: center;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
 }
 
-@media (max-width: 992px) {
-  .apple-dashboard-layout {
-    flex-direction: column;
-  }
-  .sidebar {
-    width: 100%;
+@media (max-width: 768px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

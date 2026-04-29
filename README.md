@@ -1,35 +1,135 @@
-# Vue 3 + Vite
+# 知学空间
 
-This template should help get you started developing with Vue 3 in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+一个最小可运行的家长/老师撮合平台示例，包含前端、后端、实时消息和基于 Bearer Token 的认证链路。
 
-Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://vuejs.org/guide/scaling-up/tooling.html#ide-support).
+## 技术栈
 
-## API 接入
+- 前端：Vue 3 + Vite + Vue Router
+- 后端：Express
+- 数据库：MySQL（`mysql2`）
+- 实时通信：Socket.IO
+- 认证：Bearer Token（`Authorization: Bearer <token>`）
 
-1. 复制 `.env.example` 为 `.env`。
-2. 配置 `VITE_API_BASE_URL` 为后端服务地址（例如 `http://localhost:8000`）。
-3. 家长端 5 个模块的 API 映射集中在 `src/api/parent.ts` 的 `ENDPOINTS` 常量中，可按后端实际路由修改。
+## 环境变量
 
-## 本地后端（已生成）
+### 前端（`.env`）
 
-1. 启动后端：`npm run api:dev`（默认 `http://localhost:8000`）。
-2. 启动前端：`npm run dev`（默认 `http://localhost:5173`）。
-3. 后端数据文件：`server/data/db.json`，所有写操作会落盘到该文件。
+- `VITE_API_BASE_URL`：后端 API 基础地址（例如 `http://localhost:8000`）
 
-### 已提供接口
+### 后端（启动 `node server/src/index.js` 时读取）
 
-- `GET /api/health`
-- `GET /api/parent/profile`
-- `PUT /api/parent/profile`
-- `GET /api/parent/requests`
-- `PATCH /api/parent/requests/:id/status`
-- `GET /api/parent/reviews`
-- `POST /api/parent/reviews/:id/reply`
-- `GET /api/membership/status`
-- `GET /api/membership/plans?role=parent`
-- `POST /api/membership/subscribe`
-- `GET /api/parent/settings`
-- `PUT /api/parent/settings/password`
-- `PUT /api/parent/settings/notifications`
-- `PUT /api/parent/settings/privacy`
-- `POST /api/parent/settings/deactivate`
+- `PORT`：后端端口（默认 `8000`）
+- `CORS_ORIGINS`：允许跨域来源，逗号分隔（默认 `http://localhost:5173,http://127.0.0.1:5173`）
+- `DB_HOST`：MySQL 地址（默认 `localhost`）
+- `DB_PORT`：MySQL 端口（默认 `3306`）
+- `DB_USER`：MySQL 用户（默认 `root`）
+- `DB_PASSWORD`：MySQL 密码（默认 `123456`）
+- `DB_NAME`：数据库名（默认 `zhixue`）
+- `AUTH_TOKEN_SECRET`：Token 签名密钥（默认 `zhixue-dev-secret-change-me`）
+- `AUTH_TOKEN_EXPIRES_IN_SECONDS`：Token 有效期秒数（默认 `604800`，即 7 天）
+
+## 本地启动流程
+
+1. 安装依赖
+
+```bash
+npm install
+```
+
+2. 初始化数据库（执行 `server/src/schema.sql`）
+
+```bash
+node server/src/init-db.js
+```
+
+3. 执行兼容迁移（给旧库补字段，不删数据）
+
+```bash
+npm run api:migrate:compat
+```
+
+4. 启动后端
+
+```bash
+npm run api:dev
+```
+
+5. 启动前端
+
+```bash
+npm run dev
+```
+
+6. 构建前端
+
+```bash
+npm run build
+```
+
+## 认证流程
+
+1. 家长注册/登录：
+- `POST /api/auth/parent/register`
+- `POST /api/auth/parent/login`
+
+2. 老师注册/登录：
+- `POST /api/auth/teacher/register`
+- `POST /api/auth/teacher/login`
+
+3. 登录成功后前端将 `token`、`user` 存入 `localStorage`：
+- `zhixue_auth_token`
+- `zhixue_auth_user`
+
+4. 前端请求由 `src/api/http.ts` 自动附加：
+- `Authorization: Bearer <token>`
+
+5. 后端通过 `authRequired` 中间件解析 token，注入 `req.user`。
+
+## 常用 API 简表
+
+| Method | Path | 说明 | 需要 Token |
+|---|---|---|---|
+| POST | `/api/auth/parent/register` | 家长注册 | 否 |
+| POST | `/api/auth/parent/login` | 家长登录 | 否 |
+| POST | `/api/auth/teacher/register` | 老师注册/认证提交 | 否 |
+| POST | `/api/auth/teacher/login` | 老师登录 | 否 |
+| GET | `/api/auth/me` | 获取当前用户 | 是 |
+| POST | `/api/auth/logout` | 退出登录 | 是 |
+| GET | `/api/parent/profile` | 家长资料 | 是（家长） |
+| GET | `/api/teacher/profile` | 老师资料 | 是（老师） |
+| GET | `/api/messages/conversations` | 会话列表 | 是 |
+| GET | `/api/messages/unread-count` | 未读数 | 是 |
+| GET | `/api/membership/status` | 当前会员状态 | 是 |
+| GET | `/api/membership/plans` | 会员套餐列表 | 否 |
+
+详细 API 示例见：[`docs/API.md`](./docs/API.md)
+
+## 最小回归校验
+
+### 自动 smoke 脚本
+
+脚本位置：`server/scripts/smoke-auth.js`
+
+默认访问 `http://localhost:8000`，会验证：
+
+1. 家长注册
+2. 家长登录
+3. `GET /api/auth/me`
+4. `GET /api/parent/profile`
+5. 老师注册
+6. 老师登录
+7. `GET /api/auth/me`
+8. `GET /api/teacher/profile`
+
+运行命令：
+
+```bash
+npm run smoke:auth
+```
+
+如后端非 `8000` 端口，可指定：
+
+```bash
+$env:API_BASE_URL='http://localhost:8001'
+npm run smoke:auth
+```
