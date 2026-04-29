@@ -13,8 +13,14 @@ const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http
   .split(',')
   .map((item) => item.trim())
   .filter(Boolean)
-const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || 'zhixue-dev-secret-change-me'
+const DEFAULT_AUTH_TOKEN_SECRET = 'zhixue-dev-secret-change-me'
+const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || DEFAULT_AUTH_TOKEN_SECRET
 const AUTH_TOKEN_EXPIRES_IN_SECONDS = Number(process.env.AUTH_TOKEN_EXPIRES_IN_SECONDS || 60 * 60 * 24 * 7)
+const IS_PRODUCTION = process.env.NODE_ENV === 'production'
+
+if (IS_PRODUCTION && (!process.env.AUTH_TOKEN_SECRET || AUTH_TOKEN_SECRET === DEFAULT_AUTH_TOKEN_SECRET)) {
+  throw new Error('AUTH_TOKEN_SECRET must be configured in production and must not use the default secret.')
+}
 
 const io = new Server(httpServer, {
   cors: {
@@ -42,7 +48,11 @@ app.use((req, res, next) => {
 })
 
 const ok = (res, data, message = 'ok') => res.json({ code: 0, message, data })
-const fail = (res, status, message) => res.status(status).json({ code: status, message })
+const fail = (res, status, message) => {
+  if (status === 401) return res.status(401).json({ code: 401, message: 'Unauthorized', data: null })
+  if (status === 403) return res.status(403).json({ code: 403, message: 'Forbidden', data: null })
+  return res.status(status).json({ code: status, message })
+}
 
 const toBase64Url = (input) =>
   Buffer.from(input)
@@ -158,7 +168,9 @@ const buildAuthPayload = (user) => ({
     nickname: user.nickname,
     phone: user.phone
   },
-  token: createAuthToken(user)
+  token: createAuthToken(user),
+  tokenExpiresIn: AUTH_TOKEN_EXPIRES_IN_SECONDS,
+  tokenExpiresAt: new Date(Date.now() + AUTH_TOKEN_EXPIRES_IN_SECONDS * 1000).toISOString()
 })
 
 app.get('/api/health', async (req, res) => {

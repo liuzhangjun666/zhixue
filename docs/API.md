@@ -12,6 +12,25 @@
 
 `code = 0` 为成功；非 0 为失败。
 
+鉴权相关统一错误格式：
+
+```json
+{ "code": 401, "message": "Unauthorized", "data": null }
+```
+
+```json
+{ "code": 403, "message": "Forbidden", "data": null }
+```
+
+Token 签发说明：
+- 令牌由 `AUTH_TOKEN_SECRET` 签名；
+- 令牌包含过期时间 `exp`；
+- 注册/登录成功响应包含：
+  - `token`
+  - `tokenExpiresIn`（秒）
+  - `tokenExpiresAt`（ISO 时间）
+- 生产环境必须显式配置 `AUTH_TOKEN_SECRET`，不得使用开发默认值。
+
 ## 1) POST /api/auth/parent/register
 
 - 需要 Token：否
@@ -35,7 +54,9 @@
   "message": "注册成功",
   "data": {
     "user": { "id": 101, "role": "parent", "nickname": "家长A", "phone": "13800138001" },
-    "token": "..."
+    "token": "...",
+    "tokenExpiresIn": 604800,
+    "tokenExpiresAt": "2026-05-06T12:00:00.000Z"
   }
 }
 ```
@@ -89,7 +110,9 @@
   "message": "注册成功",
   "data": {
     "user": { "id": 202, "role": "teacher", "nickname": "老师A", "phone": "13900139001" },
-    "token": "..."
+    "token": "...",
+    "tokenExpiresIn": 604800,
+    "tokenExpiresAt": "2026-05-06T12:00:00.000Z"
   }
 }
 ```
@@ -259,3 +282,13 @@ Authorization: Bearer <token>
 
 主要错误场景：
 - `401`：未登录
+
+---
+
+## 回归与验收
+
+- 自动回归脚本：
+  - `npm run smoke:auth`
+  - `npm run smoke:core`
+- 手工验收步骤：
+  - [docs/QA.md](./QA.md)
