@@ -20,15 +20,15 @@ const loading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
 const menuItems: MenuItem[] = [
-  { title: '±à¼­×ÊÁÏ', icon: Edit3, path: '/teacher-center/edit' },
-  { title: 'ÊÕµ½µÄÇëÇó', icon: ClipboardList, path: '/teacher-center/requests' },
-  { title: 'ÎÒµÄÆÀ¼Û', icon: Star, path: '/teacher-center/reviews' },
-  { title: 'Êı¾İÖĞĞÄ', icon: BarChart3, path: '/teacher-center/analytics' },
-  { title: '»áÔ±ÖĞĞÄ', icon: Crown, path: '/teacher-center/vip', highlight: true },
-  { title: 'ÕË»§ÉèÖÃ', icon: Settings, path: '/teacher-center/settings' }
+  { title: 'ç¼–è¾‘èµ„æ–™', icon: Edit3, path: '/teacher-center/edit' },
+  { title: 'æ”¶åˆ°çš„è¯·æ±‚', icon: ClipboardList, path: '/teacher-center/requests' },
+  { title: 'æˆ‘çš„è¯„ä»·', icon: Star, path: '/teacher-center/reviews' },
+  { title: 'æ•°æ®ä¸­å¿ƒ', icon: BarChart3, path: '/teacher-center/analytics' },
+  { title: 'ä¼šå‘˜ä¸­å¿ƒ', icon: Crown, path: '/teacher-center/vip', highlight: true },
+  { title: 'è´¦æˆ·è®¾ç½®', icon: Settings, path: '/teacher-center/settings' }
 ]
 
-const rankName = computed(() => membership.value?.planName || 'ÆÕÍ¨ÀÏÊ¦')
+const rankName = computed(() => membership.value?.planName || 'æ™®é€šè€å¸ˆ')
 
 const loadData = async () => {
   loading.value = true
@@ -83,32 +83,32 @@ onMounted(loadData)
         <div class="profile-row">
           <div class="avatar" @click="triggerAvatarUpload">
             <img :src="profile?.avatar || 'https://api.dicebear.com/7.x/adventurer/svg?seed=Teacher'" alt="avatar" />
-            <div class="avatar-overlay">¸ü»»Í·Ïñ</div>
+            <div class="avatar-overlay">æ›´æ¢å¤´åƒ</div>
             <input ref="fileInput" type="file" accept="image/png, image/jpeg" class="hidden-input" @change="onFileChange" />
           </div>
           <div class="profile-meta">
-            <h2>{{ profile?.teacherName || (loading ? '¼ÓÔØÖĞ...' : 'ÀÏÊ¦') }}</h2>
-            <p>{{ profile?.city || 'ËùÔÚ³ÇÊĞÎ´ÉèÖÃ' }}</p>
-            <p class="sub">³ÏĞÅÆÀ·Ö£º4.9</p>
+            <h2>{{ profile?.teacherName || (loading ? 'åŠ è½½ä¸­...' : 'è€å¸ˆ') }}</h2>
+            <p>{{ profile?.city || 'æ‰€åœ¨åŸå¸‚æœªè®¾ç½®' }}</p>
+            <p class="sub">è¯šä¿¡è¯„åˆ†ï¼š4.9</p>
           </div>
-          <button class="btn-edit" @click="navigateTo('/teacher-center/edit')">±à¼­</button>
+          <button class="btn-edit" @click="navigateTo('/teacher-center/edit')">ç¼–è¾‘</button>
         </div>
       </div>
 
       <div class="membership-card">
         <div>
           <div class="membership-title">{{ rankName }}</div>
-          <div class="membership-expire">µ½ÆÚ£º{{ membership?.expireAt || 'Î´¿ªÍ¨' }}</div>
+          <div class="membership-expire">åˆ°æœŸï¼š{{ membership?.expireAt || 'æœªå¼€é€š' }}</div>
         </div>
         <div class="membership-benefits">
-          <div>±¾ÖÜÓÅÏÈÅä¶î£º{{ membership?.weeklyPriorityQuota ?? 0 }} ´Î</div>
-          <div>Ê£Óà½âËø£º{{ membership?.remainingUnlock ?? 0 }} ´Î</div>
+          <div>æœ¬å‘¨ä¼˜å…ˆé…é¢ï¼š{{ membership?.weeklyPriorityQuota ?? 0 }} æ¬¡</div>
+          <div>å‰©ä½™è§£é”ï¼š{{ membership?.remainingUnlock ?? 0 }} æ¬¡</div>
         </div>
-        <button class="btn-membership" @click="navigateTo('/teacher-center/vip')">ÌáÉıÆØ¹â</button>
+        <button class="btn-membership" @click="navigateTo('/teacher-center/vip')">æå‡æ›å…‰</button>
       </div>
 
       <div class="teacher-card menu-card">
-        <h3>³£ÓÃ¹¦ÄÜ</h3>
+        <h3>å¸¸ç”¨åŠŸèƒ½</h3>
         <ul>
           <li v-for="item in menuItems" :key="item.path">
             <button class="menu-item" :class="{ active: route.path === item.path, highlight: item.highlight }" @click="navigateTo(item.path)">

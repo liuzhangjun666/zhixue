@@ -2,15 +2,29 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Bell, User, LogOut } from 'lucide-vue-next'
+import { AUTH_TOKEN_STORAGE_KEY, AUTH_USER_STORAGE_KEY, request, unwrapData } from '../api/http'
+import { logout } from '../api/auth'
 
 const router = useRouter()
 
 const route = useRoute()
 const currentPath = computed(() => route.path)
 
-// Hide login/register links if we are NOT on the login or register page.
-const isLoggedIn = computed(() => !['/login', '/register', '/teacher-auth'].includes(route.path))
+const isLoggedIn = computed(() => {
+  if (typeof window === 'undefined') return false
+  return Boolean(window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY))
+})
 const userRole = computed(() => {
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = window.localStorage.getItem(AUTH_USER_STORAGE_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed?.role === 'teacher') return 'teacher'
+        if (parsed?.role === 'parent') return 'parent'
+      }
+    } catch {}
+  }
   if (route.path.startsWith('/teacher')) return 'teacher'
   return 'parent'
 })
@@ -49,18 +63,17 @@ const toggleUserMenu = () => {
 
 const handleLogout = () => {
   showUserMenu.value = false
-  router.push('/login')
+  logout().finally(() => {
+    router.push('/login')
+  })
 }
 
 const fetchUnreadCount = async () => {
   if (!isLoggedIn.value) return
-  const userId = userRole.value === 'teacher' ? 2 : 1
   try {
-    const res = await fetch(`http://localhost:8000/api/messages/unread-count?userId=${userId}`)
-    const { data } = await res.json()
-    if (data) {
-      unreadCount.value = data.count
-    }
+    const payload = await request('/api/messages/unread-count')
+    const data = unwrapData(payload, { count: 0 })
+    unreadCount.value = Number(data.count || 0)
   } catch(e) {}
 }
 
@@ -88,7 +101,7 @@ onUnmounted(() => {
           <li><router-link to="/" :class="{ active: currentPath === '/' }">首页</router-link></li>
           <li><router-link to="#" class="disabled">发现</router-link></li>
           <li>
-            <router-link :to="{ path: '/messages', query: { userId: userRole === 'teacher' ? '2' : '1' } }" class="nav-link-with-badge" :class="{ active: currentPath.includes('/messages') }">
+            <router-link to="/messages" class="nav-link-with-badge" :class="{ active: currentPath.includes('/messages') }">
               消息
               <span v-if="unreadCount > 0" class="text-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
             </router-link>

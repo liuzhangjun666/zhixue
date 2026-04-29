@@ -30,11 +30,11 @@
       </div>
     </div>
 
-    <!-- 主面板：聊天�?-->
+    <!-- 主面板：聊天区 -->
     <div class="chat-main">
       <template v-if="currentConversation">
         <div class="chat-header">
-          <h3>�?{{ currentConversation.contactName }} 的对�?/h3>
+          <h3>与 {{ currentConversation.contactName }} 的对话</h3>
         </div>
         
         <div class="messages-list" ref="messagesListRef">
@@ -58,13 +58,13 @@
           />
           <button class="send-btn" @click="sendMessage" :disabled="!newMessage.trim()">
             <SendIcon class="icon" />
-            发�?
+            发送
           </button>
         </div>
       </template>
       <div v-else class="empty-chat">
         <MessageSquareIcon class="large-icon" />
-        <p>选择一个联系人开始聊�?/p>
+        <p>选择一个联系人开始聊天</p>
       </div>
     </div>
   </div>
@@ -72,18 +72,21 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { User as UserIcon, Send as SendIcon, MessageSquare as MessageSquareIcon } from 'lucide-vue-next'
 import { io } from 'socket.io-client'
+import { API_BASE_URL, AUTH_TOKEN_STORAGE_KEY, request, unwrapData } from '../api/http'
+import { getCurrentUser, getStoredUser } from '../api/auth'
 
-const route = useRoute()
-const currentUserId = Number(route.query.userId || 1)
+const router = useRouter()
+const currentUserId = ref(Number(getStoredUser()?.id || 0))
 
 const conversations = ref([])
 const currentConversation = ref(null)
 const currentMessages = ref([])
 const newMessage = ref('')
 const messagesListRef = ref(null)
+const WS_BASE_URL = API_BASE_URL ? new URL(API_BASE_URL, window.location.origin).origin : window.location.origin
 
 let socket = null
 
@@ -102,9 +105,8 @@ const scrollToBottom = async () => {
 
 const loadConversations = async () => {
   try {
-    const res = await fetch(`http://localhost:8000/api/messages/conversations?userId=${currentUserId}`)
-    const { data } = await res.json()
-    conversations.value = data
+    const payload = await request('/api/messages/conversations')
+    conversations.value = unwrapData(payload, [])
   } catch (err) {
     console.error('Failed to load conversations', err)
   }
@@ -113,15 +115,10 @@ const loadConversations = async () => {
 const selectConversation = async (conv) => {
   currentConversation.value = conv
   try {
-    await fetch(`http://localhost:8000/api/messages/${conv.id}/read`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: currentUserId })
-    })
+    await request(`/api/messages/${conv.id}/read`, { method: 'POST' })
 
-    const res = await fetch(`http://localhost:8000/api/messages/${conv.id}`)
-    const { data } = await res.json()
-    currentMessages.value = data
+    const payload = await request(`/api/messages/${conv.id}`)
+    currentMessages.value = unwrapData(payload, [])
     scrollToBottom()
     loadConversations()
   } catch (err) {
@@ -143,19 +140,36 @@ const sendMessage = () => {
 }
 
 onMounted(() => {
-  loadConversations()
+  const token = typeof window !== 'undefined' ? window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '' : ''
+  if (!token) {
+    router.replace('/login')
+    return
+  }
 
-  socket = io('http://localhost:8000', {
-    query: { userId: currentUserId }
+  getCurrentUser()
+    .then((user) => {
+      currentUserId.value = Number(user.id || 0)
+    })
+    .catch(() => {
+      router.replace('/login')
+    })
+    .finally(() => {
+      loadConversations()
+    })
+
+  socket = io(WS_BASE_URL, {
+    auth: {
+      token
+    }
   })
 
   socket.on('receive_message', (msg) => {
-    // 如果收到的消息属于当前打开的会�?
+    // 如果收到的消息属于当前打开的会话
     if (currentConversation.value && msg.conversationId === currentConversation.value.id) {
       currentMessages.value.push(msg)
       scrollToBottom()
     }
-    // 重新加载会话列表更新最新消�?
+    // 重新加载会话列表，刷新最新消息
     loadConversations()
   })
 
@@ -165,6 +179,10 @@ onMounted(() => {
       scrollToBottom()
     }
     loadConversations()
+  })
+
+  socket.on('connect_error', () => {
+    router.replace('/login')
   })
 })
 
@@ -178,7 +196,7 @@ onUnmounted(() => {
 <style scoped>
 .messages-container {
   display: flex;
-  height: calc(100vh - 100px); /* 减去 navbar 的高度及间距 */
+  height: calc(100vh - 100px); /* 鍑忓幓 navbar 鐨勯珮搴﹀強闂磋窛 */
   max-width: 1200px;
   margin: 0 auto;
   background: rgba(255, 255, 255, 0.7);
@@ -231,7 +249,7 @@ onUnmounted(() => {
 .conversation-item.active {
   background: rgba(0, 113, 227, 0.1);
   border-left: 4px solid #0071e3;
-  padding-left: 16px; /* 补偿 border 宽度 */
+  padding-left: 16px; /* 琛ュ伩 border 瀹藉害 */
 }
 
 .avatar {

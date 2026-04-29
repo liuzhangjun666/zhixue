@@ -2,6 +2,7 @@ import express from 'express'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
 import bcrypt from 'bcryptjs'
+import crypto from 'node:crypto'
 import pool from './db.js'
 
 const app = express()
@@ -12,9 +13,8 @@ const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http
   .split(',')
   .map((item) => item.trim())
   .filter(Boolean)
-
-const CURRENT_PARENT_USER_ID = 1
-const CURRENT_TEACHER_USER_ID = 2
+const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || 'zhixue-dev-secret-change-me'
+const AUTH_TOKEN_EXPIRES_IN_SECONDS = Number(process.env.AUTH_TOKEN_EXPIRES_IN_SECONDS || 60 * 60 * 24 * 7)
 
 const io = new Server(httpServer, {
   cors: {
@@ -41,8 +41,73 @@ app.use((req, res, next) => {
   next()
 })
 
-const ok = (res, data) => res.json({ code: 0, message: 'ok', data })
+const ok = (res, data, message = 'ok') => res.json({ code: 0, message, data })
 const fail = (res, status, message) => res.status(status).json({ code: status, message })
+
+const toBase64Url = (input) =>
+  Buffer.from(input)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '')
+
+const fromBase64Url = (input) => {
+  const normalized = input.replace(/-/g, '+').replace(/_/g, '/')
+  const padding = normalized.length % 4 ? '='.repeat(4 - (normalized.length % 4)) : ''
+  return Buffer.from(normalized + padding, 'base64').toString('utf8')
+}
+
+const signTokenPayload = (payloadBase64) =>
+  toBase64Url(crypto.createHmac('sha256', AUTH_TOKEN_SECRET).update(payloadBase64).digest())
+
+const createAuthToken = (user) => {
+  const now = Math.floor(Date.now() / 1000)
+  const payload = {
+    id: user.id,
+    role: user.role,
+    exp: now + AUTH_TOKEN_EXPIRES_IN_SECONDS
+  }
+  const payloadBase64 = toBase64Url(JSON.stringify(payload))
+  const signature = signTokenPayload(payloadBase64)
+  return `${payloadBase64}.${signature}`
+}
+
+const verifyAuthToken = (token) => {
+  if (!token || typeof token !== 'string') return null
+  const [payloadBase64, signature] = token.split('.')
+  if (!payloadBase64 || !signature) return null
+
+  const expected = signTokenPayload(payloadBase64)
+  const expectedBuffer = Buffer.from(expected)
+  const signatureBuffer = Buffer.from(signature)
+  if (expectedBuffer.length !== signatureBuffer.length) return null
+  if (!crypto.timingSafeEqual(expectedBuffer, signatureBuffer)) return null
+
+  try {
+    const payload = JSON.parse(fromBase64Url(payloadBase64))
+    if (!payload?.id || !payload?.role || !payload?.exp) return null
+    const now = Math.floor(Date.now() / 1000)
+    if (now >= Number(payload.exp)) return null
+    return { id: Number(payload.id), role: String(payload.role) }
+  } catch {
+    return null
+  }
+}
+
+const getBearerToken = (req) => {
+  const value = req.headers.authorization || ''
+  if (!value.toLowerCase().startsWith('bearer ')) return ''
+  return value.slice(7).trim()
+}
+
+const authRequired = (requiredRole = '') => (req, res, next) => {
+  const token = getBearerToken(req)
+  const user = verifyAuthToken(token)
+  if (!user) return fail(res, 401, 'Unauthorized')
+  if (requiredRole && user.role !== requiredRole) return fail(res, 403, 'Forbidden')
+  req.user = user
+  next()
+}
 
 const parseArrayField = (value) => {
   if (!value) return []
@@ -80,14 +145,23 @@ const getUserById = async (id) => {
   return users[0] || null
 }
 
-const getTeacherInfo = async () => getUserById(CURRENT_TEACHER_USER_ID)
-
-const resolveMembershipUserId = (req) => {
-  const role = String(req.query.role || '').toLowerCase()
-  return role === 'teacher' ? CURRENT_TEACHER_USER_ID : CURRENT_PARENT_USER_ID
+const getTeacherInfo = async (userId) => {
+  const user = await getUserById(userId)
+  if (!user || user.role !== 'teacher') return null
+  return user
 }
 
-app.get('/api/health', async (_req, res) => {
+const buildAuthPayload = (user) => ({
+  user: {
+    id: user.id,
+    role: user.role,
+    nickname: user.nickname,
+    phone: user.phone
+  },
+  token: createAuthToken(user)
+})
+
+app.get('/api/health', async (req, res) => {
   try {
     await pool.query('SELECT 1')
     ok(res, { status: 'up', db: 'connected', timestamp: new Date().toISOString() })
@@ -96,12 +170,128 @@ app.get('/api/health', async (_req, res) => {
   }
 })
 
-app.get('/api/parent/profile', async (_req, res) => {
+app.post('/api/auth/parent/register', async (req, res) => {
+  const phone = String(req.body?.phone || '').trim()
+  const password = String(req.body?.password || '')
+  const nickname = String(req.body?.nickname || '').trim()
+  if (!phone || !password || !nickname) return fail(res, 400, 'phone, password and nickname are required')
+  if (password.length < 6) return fail(res, 400, 'password must be at least 6 chars')
+
   try {
-    const user = await getUserById(CURRENT_PARENT_USER_ID)
+    const [exists] = await pool.query('SELECT id FROM users WHERE phone = ?', [phone])
+    if (exists.length) return fail(res, 409, 'æ‰‹æœºå·å·²æ³¨å†Œ')
+
+    const passwordHash = await bcrypt.hash(password, 10)
+    const [result] = await pool.query(
+      `INSERT INTO users (role, nickname, phone, password_hash, city, bio, preferred_grade, preferred_subjects)
+       VALUES ('parent', ?, ?, ?, '', '', '', '[]')`,
+      [nickname, phone, passwordHash]
+    )
+
+    const user = await getUserById(result.insertId)
+    ok(res, buildAuthPayload(user), 'æ³¨å†ŒæˆåŠŸ')
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.post('/api/auth/parent/login', async (req, res) => {
+  const phone = String(req.body?.phone || '').trim()
+  const password = String(req.body?.password || '')
+  if (!phone || !password) return fail(res, 400, 'phone and password are required')
+
+  try {
+    const [users] = await pool.query('SELECT * FROM users WHERE phone = ? AND role = ? LIMIT 1', [phone, 'parent'])
+    const user = users[0]
+    if (!user) return fail(res, 401, 'æ‰‹æœºå·æˆ–å¯†ç é”™è¯¯')
+
+    const matched = await bcrypt.compare(password, user.password_hash || '')
+    if (!matched) return fail(res, 401, 'æ‰‹æœºå·æˆ–å¯†ç é”™è¯¯')
+    ok(res, buildAuthPayload(user), 'ç™»å½•æˆåŠŸ')
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.post('/api/auth/teacher/register', async (req, res) => {
+  const phone = String(req.body?.phone || '').trim()
+  const password = String(req.body?.password || '')
+  const nickname = String(req.body?.nickname || '').trim()
+  const subject = String(req.body?.subject || '').trim()
+  const experience = String(req.body?.experience || '').trim()
+
+  if (!phone || !password || !nickname) return fail(res, 400, 'phone, password and nickname are required')
+  if (password.length < 6) return fail(res, 400, 'password must be at least 6 chars')
+
+  try {
+    const [exists] = await pool.query('SELECT id FROM users WHERE phone = ?', [phone])
+    if (exists.length) return fail(res, 409, 'æ‰‹æœºå·å·²æ³¨å†Œ')
+
+    const passwordHash = await bcrypt.hash(password, 10)
+    const preferredSubjects = subject ? [subject] : []
+    const [result] = await pool.query(
+      `INSERT INTO users (role, nickname, phone, password_hash, city, bio, preferred_grade, preferred_subjects)
+       VALUES ('teacher', ?, ?, ?, '', ?, '', ?)`,
+      [nickname, phone, passwordHash, experience, JSON.stringify(preferredSubjects)]
+    )
+
+    const user = await getUserById(result.insertId)
+    ok(res, buildAuthPayload(user), 'æ³¨å†ŒæˆåŠŸ')
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.post('/api/auth/teacher/login', async (req, res) => {
+  const phone = String(req.body?.phone || '').trim()
+  const password = String(req.body?.password || '')
+  if (!phone || !password) return fail(res, 400, 'phone and password are required')
+
+  try {
+    const [users] = await pool.query('SELECT * FROM users WHERE phone = ? AND role = ? LIMIT 1', [phone, 'teacher'])
+    const user = users[0]
+    if (!user) return fail(res, 401, 'æ‰‹æœºå·æˆ–å¯†ç é”™è¯¯')
+
+    const matched = await bcrypt.compare(password, user.password_hash || '')
+    if (!matched) return fail(res, 401, 'æ‰‹æœºå·æˆ–å¯†ç é”™è¯¯')
+    ok(res, buildAuthPayload(user), 'ç™»å½•æˆåŠŸ')
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.get('/api/auth/me', authRequired(), async (req, res) => {
+  try {
+    const user = await getUserById(req.user.id)
+    if (!user) return fail(res, 404, 'User not found')
+    ok(
+      res,
+      {
+        id: user.id,
+        role: user.role,
+        nickname: user.nickname,
+        phone: user.phone,
+        city: user.city,
+        bio: user.bio,
+        avatar: user.avatar || ''
+      },
+      'ok'
+    )
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.post('/api/auth/logout', authRequired(), (_req, res) => {
+  ok(res, { success: true }, 'é€€å‡ºæˆåŠŸ')
+})
+
+app.get('/api/parent/profile', authRequired('parent'), async (req, res) => {
+  try {
+    const user = await getUserById(req.user.id)
     if (!user) return fail(res, 404, 'User not found')
 
-    const [children] = await pool.query('SELECT * FROM children WHERE parent_id = ?', [CURRENT_PARENT_USER_ID])
+    const [children] = await pool.query('SELECT * FROM children WHERE parent_id = ?', [req.user.id])
 
     ok(res, {
       parentName: user.nickname,
@@ -123,7 +313,7 @@ app.get('/api/parent/profile', async (_req, res) => {
   }
 })
 
-app.put('/api/parent/profile', async (req, res) => {
+app.put('/api/parent/profile', authRequired('parent'), async (req, res) => {
   const payload = req.body || {}
   if (!payload.parentName || !payload.phone) return fail(res, 400, 'parentName and phone are required')
 
@@ -138,15 +328,15 @@ app.put('/api/parent/profile', async (req, res) => {
         payload.phone,
         payload.city || '',
         payload.bio || '',
-        payload.preferredGrade || 'Ð¡Ñ§',
+        payload.preferredGrade || 'å°å­¦',
         JSON.stringify(payload.preferredSubjects || []),
-        CURRENT_PARENT_USER_ID
+        req.user.id
       ]
     )
 
-    await conn.query('DELETE FROM children WHERE parent_id=?', [CURRENT_PARENT_USER_ID])
+    await conn.query('DELETE FROM children WHERE parent_id=?', [req.user.id])
     if (Array.isArray(payload.children) && payload.children.length > 0) {
-      const childrenData = payload.children.map((c) => [CURRENT_PARENT_USER_ID, c.name, c.grade || '', c.targetSubject || ''])
+      const childrenData = payload.children.map((c) => [req.user.id, c.name, c.grade || '', c.targetSubject || ''])
       await conn.query('INSERT INTO children (parent_id, name, grade, target_subject) VALUES ?', [childrenData])
     }
 
@@ -160,20 +350,20 @@ app.put('/api/parent/profile', async (req, res) => {
   }
 })
 
-app.post('/api/parent/avatar', async (req, res) => {
+app.post('/api/parent/avatar', authRequired('parent'), async (req, res) => {
   const avatar = String(req.body?.avatar || '')
   if (!avatar) return fail(res, 400, 'Missing avatar data')
   try {
-    await pool.query('UPDATE users SET avatar = ? WHERE id = ?', [avatar, CURRENT_PARENT_USER_ID])
+    await pool.query('UPDATE users SET avatar = ? WHERE id = ?', [avatar, req.user.id])
     ok(res, { avatar })
   } catch (error) {
     fail(res, 500, error.message)
   }
 })
 
-app.get('/api/parent/requests', async (_req, res) => {
+app.get('/api/parent/requests', authRequired('parent'), async (req, res) => {
   try {
-    const [requests] = await pool.query('SELECT * FROM requests WHERE parent_id = ? ORDER BY created_at DESC', [CURRENT_PARENT_USER_ID])
+    const [requests] = await pool.query('SELECT * FROM requests WHERE parent_id = ? ORDER BY created_at DESC', [req.user.id])
     ok(
       res,
       requests.map((r) => ({
@@ -193,7 +383,31 @@ app.get('/api/parent/requests', async (_req, res) => {
   }
 })
 
-app.post('/api/parent/requests', async (req, res) => {
+app.get('/api/parent/requests/:id', authRequired('parent'), async (req, res) => {
+  const id = Number(req.params.id)
+  if (!Number.isInteger(id) || id <= 0) return fail(res, 400, 'Invalid request id')
+  try {
+    const [rows] = await pool.query('SELECT * FROM requests WHERE id = ? AND parent_id = ? LIMIT 1', [id, req.user.id])
+    if (!rows.length) return fail(res, 404, 'Request not found')
+    const item = rows[0]
+    ok(res, {
+      id: item.id,
+      title: item.title,
+      subject: item.subject,
+      grade: item.grade,
+      budget: item.budget,
+      schedule: item.schedule,
+      status: item.status,
+      teacherName: item.teacher_name || '',
+      description: item.description || '',
+      createdAt: new Date(item.created_at).toISOString().slice(0, 10)
+    })
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.post('/api/parent/requests', authRequired('parent'), async (req, res) => {
   const payload = req.body || {}
   const title = String(payload.title || '').trim()
   if (!title) return fail(res, 400, 'title is required')
@@ -203,7 +417,7 @@ app.post('/api/parent/requests', async (req, res) => {
       `INSERT INTO requests (parent_id, title, subject, grade, budget, schedule, status, teacher_name)
        VALUES (?, ?, ?, ?, ?, ?, 'pending', '')`,
       [
-        CURRENT_PARENT_USER_ID,
+        req.user.id,
         title,
         String(payload.subject || ''),
         String(payload.grade || ''),
@@ -217,7 +431,7 @@ app.post('/api/parent/requests', async (req, res) => {
   }
 })
 
-app.patch('/api/parent/requests/:id/status', async (req, res) => {
+app.patch('/api/parent/requests/:id/status', authRequired('parent'), async (req, res) => {
   const id = Number(req.params.id)
   const status = String(req.body?.status || '')
   if (!['pending', 'matching', 'scheduled', 'completed', 'cancelled'].includes(status)) {
@@ -227,7 +441,7 @@ app.patch('/api/parent/requests/:id/status', async (req, res) => {
     const [result] = await pool.query('UPDATE requests SET status = ? WHERE id = ? AND parent_id = ?', [
       status,
       id,
-      CURRENT_PARENT_USER_ID
+      req.user.id
     ])
     if (result.affectedRows === 0) return fail(res, 404, 'Request not found')
     ok(res, { id, status })
@@ -236,9 +450,9 @@ app.patch('/api/parent/requests/:id/status', async (req, res) => {
   }
 })
 
-app.get('/api/parent/reviews', async (_req, res) => {
+app.get('/api/parent/reviews', authRequired('parent'), async (req, res) => {
   try {
-    const [reviews] = await pool.query('SELECT * FROM reviews WHERE parent_id = ? ORDER BY created_at DESC', [CURRENT_PARENT_USER_ID])
+    const [reviews] = await pool.query('SELECT * FROM reviews WHERE parent_id = ? ORDER BY created_at DESC', [req.user.id])
     ok(
       res,
       reviews.map((r) => ({
@@ -256,13 +470,13 @@ app.get('/api/parent/reviews', async (_req, res) => {
   }
 })
 
-app.post('/api/parent/reviews/:id/reply', async (req, res) => {
+app.post('/api/parent/reviews/:id/reply', authRequired('parent'), async (req, res) => {
   const id = Number(req.params.id)
   const reply = String(req.body?.reply || '').trim()
   if (!reply) return fail(res, 400, 'reply cannot be empty')
 
   try {
-    const [result] = await pool.query('UPDATE reviews SET reply = ? WHERE id = ? AND parent_id = ?', [reply, id, CURRENT_PARENT_USER_ID])
+    const [result] = await pool.query('UPDATE reviews SET reply = ? WHERE id = ? AND parent_id = ?', [reply, id, req.user.id])
     if (result.affectedRows === 0) return fail(res, 404, 'Review not found')
     ok(res, { id, reply })
   } catch (error) {
@@ -270,9 +484,9 @@ app.post('/api/parent/reviews/:id/reply', async (req, res) => {
   }
 })
 
-app.get('/api/membership/status', async (req, res) => {
-  const userId = resolveMembershipUserId(req)
-  const defaultName = userId === CURRENT_TEACHER_USER_ID ? 'ÆÕÍ¨ÀÏÊ¦' : 'ÆÕÍ¨ÓÃ»§'
+app.get('/api/membership/status', authRequired(), async (req, res) => {
+  const userId = req.user.id
+  const defaultName = req.user.role === 'teacher' ? 'æ™®é€šè€å¸ˆ' : 'æ™®é€šç”¨æˆ·'
   try {
     const [memberships] = await pool.query('SELECT * FROM memberships WHERE user_id = ?', [userId])
     if (memberships.length === 0) {
@@ -291,7 +505,7 @@ app.get('/api/membership/status', async (req, res) => {
   }
 })
 
-app.get('/api/membership/plans', async (_req, res) => {
+app.get('/api/membership/plans', async (req, res) => {
   try {
     const [plans] = await pool.query('SELECT * FROM membership_plans')
     ok(
@@ -310,10 +524,10 @@ app.get('/api/membership/plans', async (_req, res) => {
   }
 })
 
-app.post('/api/membership/subscribe', async (req, res) => {
+app.post('/api/membership/subscribe', authRequired(), async (req, res) => {
   const planId = String(req.body?.plan_id || '')
   const autoRenew = Boolean(req.body?.auto_renew)
-  const userId = req.body?.role === 'teacher' ? CURRENT_TEACHER_USER_ID : CURRENT_PARENT_USER_ID
+  const userId = req.user.id
 
   try {
     const [plans] = await pool.query('SELECT * FROM membership_plans WHERE id = ?', [planId])
@@ -349,9 +563,9 @@ app.post('/api/membership/subscribe', async (req, res) => {
   }
 })
 
-app.get('/api/parent/settings', async (_req, res) => {
+app.get('/api/parent/settings', authRequired('parent'), async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM user_settings WHERE user_id = ?', [CURRENT_PARENT_USER_ID])
+    const [rows] = await pool.query('SELECT * FROM user_settings WHERE user_id = ?', [req.user.id])
     if (!rows.length) return ok(res, { notifications: {}, privacy: {} })
     ok(res, {
       notifications: parseObjectField(rows[0].notifications),
@@ -362,34 +576,34 @@ app.get('/api/parent/settings', async (_req, res) => {
   }
 })
 
-app.put('/api/parent/settings/password', async (req, res) => {
+app.put('/api/parent/settings/password', authRequired('parent'), async (req, res) => {
   const currentPassword = String(req.body?.current_password || '')
   const nextPassword = String(req.body?.new_password || '')
   if (nextPassword.length < 6) return fail(res, 400, 'New password must be at least 6 chars')
 
   try {
-    const [users] = await pool.query('SELECT password_hash FROM users WHERE id = ?', [CURRENT_PARENT_USER_ID])
+    const [users] = await pool.query('SELECT password_hash FROM users WHERE id = ?', [req.user.id])
     if (!users.length) return fail(res, 404, 'User not found')
 
     const isMatch = await bcrypt.compare(currentPassword, users[0].password_hash)
     if (!isMatch) return fail(res, 400, 'Current password is incorrect')
 
     const hash = await bcrypt.hash(nextPassword, 10)
-    await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [hash, CURRENT_PARENT_USER_ID])
+    await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [hash, req.user.id])
     ok(res, { updated: true })
   } catch (error) {
     fail(res, 500, error.message)
   }
 })
 
-app.put('/api/parent/settings/notifications', async (req, res) => {
+app.put('/api/parent/settings/notifications', authRequired('parent'), async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT notifications FROM user_settings WHERE user_id = ?', [CURRENT_PARENT_USER_ID])
+    const [rows] = await pool.query('SELECT notifications FROM user_settings WHERE user_id = ?', [req.user.id])
     const current = rows.length ? parseObjectField(rows[0].notifications) : {}
     const nextOpts = { ...current, ...(req.body || {}) }
     await pool.query(
       'INSERT INTO user_settings (user_id, notifications) VALUES (?, ?) ON DUPLICATE KEY UPDATE notifications=VALUES(notifications)',
-      [CURRENT_PARENT_USER_ID, JSON.stringify(nextOpts)]
+      [req.user.id, JSON.stringify(nextOpts)]
     )
     ok(res, nextOpts)
   } catch (error) {
@@ -397,14 +611,14 @@ app.put('/api/parent/settings/notifications', async (req, res) => {
   }
 })
 
-app.put('/api/parent/settings/privacy', async (req, res) => {
+app.put('/api/parent/settings/privacy', authRequired('parent'), async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT privacy FROM user_settings WHERE user_id = ?', [CURRENT_PARENT_USER_ID])
+    const [rows] = await pool.query('SELECT privacy FROM user_settings WHERE user_id = ?', [req.user.id])
     const current = rows.length ? parseObjectField(rows[0].privacy) : {}
     const nextOpts = { ...current, ...(req.body || {}) }
     await pool.query(
       'INSERT INTO user_settings (user_id, privacy) VALUES (?, ?) ON DUPLICATE KEY UPDATE privacy=VALUES(privacy)',
-      [CURRENT_PARENT_USER_ID, JSON.stringify(nextOpts)]
+      [req.user.id, JSON.stringify(nextOpts)]
     )
     ok(res, nextOpts)
   } catch (error) {
@@ -412,12 +626,13 @@ app.put('/api/parent/settings/privacy', async (req, res) => {
   }
 })
 
-app.post('/api/parent/settings/deactivate', async (req, res) => {
-  if (req.body?.confirm_text !== '×¢ÏúÕËºÅ') return fail(res, 400, 'Confirm text mismatch')
+app.post('/api/parent/settings/deactivate', authRequired('parent'), async (req, res) => {
+  const confirmText = String(req.body?.confirm_text || '')
+  if (!['æ³¨é”€è´¦å·', 'æ³¨ é”€ è´¦å·', 'æ³¨é”€'].includes(confirmText)) return fail(res, 400, 'Confirm text mismatch')
   try {
     await pool.query(
       'INSERT INTO user_settings (user_id, deactivated) VALUES (?, TRUE) ON DUPLICATE KEY UPDATE deactivated=TRUE',
-      [CURRENT_PARENT_USER_ID]
+      [req.user.id]
     )
     ok(res, { deactivated: true })
   } catch (error) {
@@ -425,9 +640,9 @@ app.post('/api/parent/settings/deactivate', async (req, res) => {
   }
 })
 
-app.get('/api/teacher/profile', async (_req, res) => {
+app.get('/api/teacher/profile', authRequired('teacher'), async (req, res) => {
   try {
-    const teacher = await getTeacherInfo()
+    const teacher = await getTeacherInfo(req.user.id)
     if (!teacher) return fail(res, 404, 'Teacher not found')
     ok(res, {
       teacherName: teacher.nickname,
@@ -443,7 +658,7 @@ app.get('/api/teacher/profile', async (_req, res) => {
   }
 })
 
-app.put('/api/teacher/profile', async (req, res) => {
+app.put('/api/teacher/profile', authRequired('teacher'), async (req, res) => {
   const payload = req.body || {}
   if (!payload.teacherName || !payload.phone) return fail(res, 400, 'teacherName and phone are required')
   try {
@@ -456,7 +671,7 @@ app.put('/api/teacher/profile', async (req, res) => {
         payload.bio || '',
         Array.isArray(payload.preferredGrades) ? payload.preferredGrades.join(',') : '',
         JSON.stringify(payload.preferredSubjects || []),
-        CURRENT_TEACHER_USER_ID
+        req.user.id
       ]
     )
     ok(res, { updated: true })
@@ -465,20 +680,20 @@ app.put('/api/teacher/profile', async (req, res) => {
   }
 })
 
-app.post('/api/teacher/avatar', async (req, res) => {
+app.post('/api/teacher/avatar', authRequired('teacher'), async (req, res) => {
   const avatar = String(req.body?.avatar || '')
   if (!avatar) return fail(res, 400, 'Missing avatar data')
   try {
-    await pool.query('UPDATE users SET avatar = ? WHERE id = ?', [avatar, CURRENT_TEACHER_USER_ID])
+    await pool.query('UPDATE users SET avatar = ? WHERE id = ?', [avatar, req.user.id])
     ok(res, { avatar })
   } catch (error) {
     fail(res, 500, error.message)
   }
 })
 
-app.get('/api/teacher/requests', async (_req, res) => {
+app.get('/api/teacher/requests', authRequired('teacher'), async (req, res) => {
   try {
-    const teacher = await getTeacherInfo()
+    const teacher = await getTeacherInfo(req.user.id)
     if (!teacher) return fail(res, 404, 'Teacher not found')
 
     const [rows] = await pool.query(
@@ -511,10 +726,10 @@ app.get('/api/teacher/requests', async (_req, res) => {
   }
 })
 
-app.post('/api/teacher/requests/:id/accept', async (req, res) => {
+app.post('/api/teacher/requests/:id/accept', authRequired('teacher'), async (req, res) => {
   const id = Number(req.params.id)
   try {
-    const teacher = await getTeacherInfo()
+    const teacher = await getTeacherInfo(req.user.id)
     if (!teacher) return fail(res, 404, 'Teacher not found')
     const [result] = await pool.query(
       `UPDATE requests
@@ -529,10 +744,10 @@ app.post('/api/teacher/requests/:id/accept', async (req, res) => {
   }
 })
 
-app.post('/api/teacher/requests/:id/release', async (req, res) => {
+app.post('/api/teacher/requests/:id/release', authRequired('teacher'), async (req, res) => {
   const id = Number(req.params.id)
   try {
-    const teacher = await getTeacherInfo()
+    const teacher = await getTeacherInfo(req.user.id)
     if (!teacher) return fail(res, 404, 'Teacher not found')
     const [result] = await pool.query(
       `UPDATE requests
@@ -547,14 +762,14 @@ app.post('/api/teacher/requests/:id/release', async (req, res) => {
   }
 })
 
-app.patch('/api/teacher/requests/:id/status', async (req, res) => {
+app.patch('/api/teacher/requests/:id/status', authRequired('teacher'), async (req, res) => {
   const id = Number(req.params.id)
   const status = String(req.body?.status || '')
   if (!['pending', 'matching', 'scheduled', 'completed', 'cancelled'].includes(status)) {
     return fail(res, 400, 'Invalid status')
   }
   try {
-    const teacher = await getTeacherInfo()
+    const teacher = await getTeacherInfo(req.user.id)
     if (!teacher) return fail(res, 404, 'Teacher not found')
     const [result] = await pool.query('UPDATE requests SET status = ? WHERE id = ? AND teacher_name = ?', [
       status,
@@ -568,9 +783,9 @@ app.patch('/api/teacher/requests/:id/status', async (req, res) => {
   }
 })
 
-app.get('/api/teacher/reviews', async (_req, res) => {
+app.get('/api/teacher/reviews', authRequired('teacher'), async (req, res) => {
   try {
-    const teacher = await getTeacherInfo()
+    const teacher = await getTeacherInfo(req.user.id)
     if (!teacher) return fail(res, 404, 'Teacher not found')
 
     const [reviews] = await pool.query(
@@ -598,9 +813,9 @@ app.get('/api/teacher/reviews', async (_req, res) => {
   }
 })
 
-app.get('/api/teacher/analytics', async (_req, res) => {
+app.get('/api/teacher/analytics', authRequired('teacher'), async (req, res) => {
   try {
-    const teacher = await getTeacherInfo()
+    const teacher = await getTeacherInfo(req.user.id)
     if (!teacher) return fail(res, 404, 'Teacher not found')
 
     const [requestRows] = await pool.query(
@@ -646,11 +861,11 @@ app.get('/api/teacher/analytics', async (_req, res) => {
   }
 })
 
-app.get('/api/teacher/membership/status', async (_req, res) => {
+app.get('/api/teacher/membership/status', authRequired('teacher'), async (req, res) => {
   try {
-    const [memberships] = await pool.query('SELECT * FROM memberships WHERE user_id = ?', [CURRENT_TEACHER_USER_ID])
+    const [memberships] = await pool.query('SELECT * FROM memberships WHERE user_id = ?', [req.user.id])
     if (!memberships.length) {
-      return ok(res, { planName: 'ÆÕÍ¨ÀÏÊ¦', expireAt: null, remainingUnlock: 3, weeklyPriorityQuota: 1 })
+      return ok(res, { planName: 'æ™®é€šè€å¸ˆ', expireAt: null, remainingUnlock: 3, weeklyPriorityQuota: 1 })
     }
     const m = memberships[0]
     ok(res, {
@@ -665,42 +880,42 @@ app.get('/api/teacher/membership/status', async (_req, res) => {
   }
 })
 
-app.get('/api/teacher/membership/plans', async (_req, res) => {
+app.get('/api/teacher/membership/plans', authRequired('teacher'), async (req, res) => {
   ok(res, [
     {
       id: 'bronze',
-      name: 'Í­ÅÆÀÏÊ¦',
+      name: 'é“œç‰Œè€å¸ˆ',
       price: 19.9,
       durationMonth: 1,
-      features: ['Ã¿Ìì 5 ´Î½âËø´ÎÊý', 'ÖÐ²¿ÆØ¹âÎ»', '»ù´¡Êý¾ÝÃæ°å'],
+      features: ['æ¯å¤© 5 æ¬¡è§£é”æ¬¡æ•°', 'ä¸­éƒ¨æ›å…‰ä½', 'åŸºç¡€æ•°æ®é¢æ¿'],
       recommended: false
     },
     {
       id: 'silver',
-      name: 'ÒøÅÆÀÏÊ¦',
+      name: 'é“¶ç‰Œè€å¸ˆ',
       price: 29.9,
       durationMonth: 1,
-      features: ['Ã¿Ìì 10 ´Î½âËø´ÎÊý', 'ÉÏ²¿ÆØ¹âÎ»', 'ÏêÏ¸±¨±í + ÊµÊ±Í¨Öª'],
+      features: ['æ¯å¤© 10 æ¬¡è§£é”æ¬¡æ•°', 'ä¸Šéƒ¨æ›å…‰ä½', 'è¯¦ç»†æŠ¥è¡¨ + å®žæ—¶é€šçŸ¥'],
       recommended: true
     },
     {
       id: 'gold',
-      name: '½ðÅÆÀÏÊ¦',
+      name: 'é‡‘ç‰Œè€å¸ˆ',
       price: 49.9,
       durationMonth: 1,
-      features: ['ÎÞÏÞ½âËø´ÎÊý', '¶¥²¿ÖÃ¶¥ÆØ¹â', 'ÓÅÏÈÍÆ¼ö + ×¨Êô¿Í·þ'],
+      features: ['æ— é™è§£é”æ¬¡æ•°', 'é¡¶éƒ¨ç½®é¡¶æ›å…‰', 'ä¼˜å…ˆæŽ¨è + ä¸“å±žå®¢æœ'],
       recommended: false
     }
   ])
 })
 
-app.post('/api/teacher/membership/subscribe', async (req, res) => {
+app.post('/api/teacher/membership/subscribe', authRequired('teacher'), async (req, res) => {
   const planId = String(req.body?.plan_id || '')
   const autoRenew = Boolean(req.body?.auto_renew)
   const planMap = {
-    bronze: { name: 'Í­ÅÆÀÏÊ¦', unlock: 5, quota: 2 },
-    silver: { name: 'ÒøÅÆÀÏÊ¦', unlock: 10, quota: 5 },
-    gold: { name: '½ðÅÆÀÏÊ¦', unlock: 999, quota: 10 }
+    bronze: { name: 'é“œç‰Œè€å¸ˆ', unlock: 5, quota: 2 },
+    silver: { name: 'é“¶ç‰Œè€å¸ˆ', unlock: 10, quota: 5 },
+    gold: { name: 'é‡‘ç‰Œè€å¸ˆ', unlock: 999, quota: 10 }
   }
   const selected = planMap[planId]
   if (!selected) return fail(res, 404, 'Plan not found')
@@ -717,7 +932,7 @@ app.post('/api/teacher/membership/subscribe', async (req, res) => {
          remaining_unlock=VALUES(remaining_unlock),
          weekly_priority_quota=VALUES(weekly_priority_quota),
          auto_renew=VALUES(auto_renew)`,
-      [CURRENT_TEACHER_USER_ID, selected.name, expire, selected.unlock, selected.quota, autoRenew]
+      [req.user.id, selected.name, expire, selected.unlock, selected.quota, autoRenew]
     )
 
     ok(res, {
@@ -732,9 +947,9 @@ app.post('/api/teacher/membership/subscribe', async (req, res) => {
   }
 })
 
-app.get('/api/teacher/settings', async (_req, res) => {
+app.get('/api/teacher/settings', authRequired('teacher'), async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM user_settings WHERE user_id = ?', [CURRENT_TEACHER_USER_ID])
+    const [rows] = await pool.query('SELECT * FROM user_settings WHERE user_id = ?', [req.user.id])
     if (!rows.length) return ok(res, { notifications: {}, privacy: {} })
     ok(res, {
       notifications: parseObjectField(rows[0].notifications),
@@ -745,31 +960,31 @@ app.get('/api/teacher/settings', async (_req, res) => {
   }
 })
 
-app.put('/api/teacher/settings/password', async (req, res) => {
+app.put('/api/teacher/settings/password', authRequired('teacher'), async (req, res) => {
   const currentPassword = String(req.body?.current_password || '')
   const nextPassword = String(req.body?.new_password || '')
   if (nextPassword.length < 6) return fail(res, 400, 'New password must be at least 6 chars')
   try {
-    const [users] = await pool.query('SELECT password_hash FROM users WHERE id = ?', [CURRENT_TEACHER_USER_ID])
+    const [users] = await pool.query('SELECT password_hash FROM users WHERE id = ?', [req.user.id])
     if (!users.length) return fail(res, 404, 'Teacher not found')
     const matched = await bcrypt.compare(currentPassword, users[0].password_hash)
     if (!matched) return fail(res, 400, 'Current password is incorrect')
     const hash = await bcrypt.hash(nextPassword, 10)
-    await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [hash, CURRENT_TEACHER_USER_ID])
+    await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [hash, req.user.id])
     ok(res, { updated: true })
   } catch (error) {
     fail(res, 500, error.message)
   }
 })
 
-app.put('/api/teacher/settings/notifications', async (req, res) => {
+app.put('/api/teacher/settings/notifications', authRequired('teacher'), async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT notifications FROM user_settings WHERE user_id = ?', [CURRENT_TEACHER_USER_ID])
+    const [rows] = await pool.query('SELECT notifications FROM user_settings WHERE user_id = ?', [req.user.id])
     const current = rows.length ? parseObjectField(rows[0].notifications) : {}
     const nextOpts = { ...current, ...(req.body || {}) }
     await pool.query(
       'INSERT INTO user_settings (user_id, notifications) VALUES (?, ?) ON DUPLICATE KEY UPDATE notifications=VALUES(notifications)',
-      [CURRENT_TEACHER_USER_ID, JSON.stringify(nextOpts)]
+      [req.user.id, JSON.stringify(nextOpts)]
     )
     ok(res, nextOpts)
   } catch (error) {
@@ -777,14 +992,14 @@ app.put('/api/teacher/settings/notifications', async (req, res) => {
   }
 })
 
-app.put('/api/teacher/settings/privacy', async (req, res) => {
+app.put('/api/teacher/settings/privacy', authRequired('teacher'), async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT privacy FROM user_settings WHERE user_id = ?', [CURRENT_TEACHER_USER_ID])
+    const [rows] = await pool.query('SELECT privacy FROM user_settings WHERE user_id = ?', [req.user.id])
     const current = rows.length ? parseObjectField(rows[0].privacy) : {}
     const nextOpts = { ...current, ...(req.body || {}) }
     await pool.query(
       'INSERT INTO user_settings (user_id, privacy) VALUES (?, ?) ON DUPLICATE KEY UPDATE privacy=VALUES(privacy)',
-      [CURRENT_TEACHER_USER_ID, JSON.stringify(nextOpts)]
+      [req.user.id, JSON.stringify(nextOpts)]
     )
     ok(res, nextOpts)
   } catch (error) {
@@ -793,8 +1008,8 @@ app.put('/api/teacher/settings/privacy', async (req, res) => {
 })
 
 // Messages API
-app.get('/api/messages/conversations', async (req, res) => {
-  const userId = req.query.userId ? Number(req.query.userId) : CURRENT_PARENT_USER_ID
+app.get('/api/messages/conversations', authRequired(), async (req, res) => {
+  const userId = req.user.id
   try {
     const [conversations] = await pool.query(
       `SELECT c.id, c.last_message, c.updated_at,
@@ -822,8 +1037,8 @@ app.get('/api/messages/conversations', async (req, res) => {
   }
 })
 
-app.get('/api/messages/unread-count', async (req, res) => {
-  const userId = req.query.userId ? Number(req.query.userId) : CURRENT_PARENT_USER_ID
+app.get('/api/messages/unread-count', authRequired(), async (req, res) => {
+  const userId = req.user.id
   try {
     const [rows] = await pool.query(
       `SELECT COUNT(*) AS count
@@ -840,10 +1055,18 @@ app.get('/api/messages/unread-count', async (req, res) => {
   }
 })
 
-app.get('/api/messages/:conversationId', async (req, res) => {
+app.get('/api/messages/:conversationId', authRequired(), async (req, res) => {
   const conversationId = Number(req.params.conversationId)
   try {
-    const [messages] = await pool.query('SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC', [conversationId])
+    const [messages] = await pool.query(
+      `SELECT m.*
+       FROM messages m
+       JOIN conversations c ON c.id = m.conversation_id
+       WHERE m.conversation_id = ?
+         AND (c.parent_id = ? OR c.teacher_id = ?)
+       ORDER BY m.created_at ASC`,
+      [conversationId, req.user.id, req.user.id]
+    )
     ok(
       res,
       messages.map((m) => ({
@@ -859,15 +1082,19 @@ app.get('/api/messages/:conversationId', async (req, res) => {
   }
 })
 
-app.post('/api/messages/:conversationId/read', async (req, res) => {
+app.post('/api/messages/:conversationId/read', authRequired(), async (req, res) => {
   const conversationId = Number(req.params.conversationId)
-  const userId = req.body?.userId ? Number(req.body.userId) : CURRENT_PARENT_USER_ID
+  const userId = req.user.id
   try {
     await pool.query(
-      `UPDATE messages
+      `UPDATE messages m
+       JOIN conversations c ON c.id = m.conversation_id
        SET is_read = TRUE
-       WHERE conversation_id = ? AND sender_id != ? AND is_read = FALSE`,
-      [conversationId, userId]
+       WHERE m.conversation_id = ?
+         AND (c.parent_id = ? OR c.teacher_id = ?)
+         AND m.sender_id != ?
+         AND m.is_read = FALSE`,
+      [conversationId, userId, userId, userId]
     )
     ok(res, { success: true })
   } catch (error) {
@@ -876,17 +1103,50 @@ app.post('/api/messages/:conversationId/read', async (req, res) => {
 })
 
 // Socket.io
+io.use((socket, next) => {
+  const tokenFromAuth = socket.handshake.auth?.token
+  const tokenFromHeader = String(socket.handshake.headers?.authorization || '')
+    .replace(/^Bearer\s+/i, '')
+    .trim()
+  const token = tokenFromAuth || tokenFromHeader
+  const user = verifyAuthToken(token)
+  if (!user) return next(new Error('Unauthorized'))
+  socket.user = user
+  next()
+})
+
 io.on('connection', (socket) => {
-  const userId = Number(socket.handshake.query.userId || CURRENT_PARENT_USER_ID)
+  const userId = Number(socket.user.id)
   socket.join(`user_${userId}`)
 
   socket.on('send_message', async (data) => {
-    const { conversationId, receiverId, content } = data || {}
-    if (!conversationId || !receiverId || !content) return
+    const conversationId = Number(data?.conversationId || 0)
+    const content = String(data?.content || '').trim()
+    if (!conversationId || !content) return
 
     const conn = await pool.getConnection()
     try {
       await conn.beginTransaction()
+
+      const [conversationRows] = await conn.query(
+        'SELECT id, parent_id, teacher_id FROM conversations WHERE id = ? LIMIT 1',
+        [conversationId]
+      )
+      const conversation = conversationRows[0]
+      if (!conversation) {
+        await conn.rollback()
+        return
+      }
+      if (conversation.parent_id !== userId && conversation.teacher_id !== userId) {
+        await conn.rollback()
+        return
+      }
+
+      const receiverId = conversation.parent_id === userId ? conversation.teacher_id : conversation.parent_id
+      if (!receiverId) {
+        await conn.rollback()
+        return
+      }
 
       const [result] = await conn.query('INSERT INTO messages (conversation_id, sender_id, content) VALUES (?, ?, ?)', [
         conversationId,
@@ -925,3 +1185,6 @@ app.use((_req, res) => fail(res, 404, 'Not Found'))
 httpServer.listen(PORT, () => {
   console.log(`[api] running at http://localhost:${PORT} (with WebSocket)`)
 })
+
+
+

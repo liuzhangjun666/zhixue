@@ -15,11 +15,11 @@ const filtered = computed(() => {
 })
 
 const statusLabel: Record<string, string> = {
-  pending: '´ı´¦Àí',
-  matching: 'Æ¥ÅäÖĞ',
-  scheduled: 'ÒÑÔ¼¿Î',
-  completed: 'ÒÑÍê³É',
-  cancelled: 'ÒÑÈ¡Ïû'
+  pending: 'å¾…å¤„ç†',
+  matching: 'åŒ¹é…ä¸­',
+  scheduled: 'å·²çº¦è¯¾',
+  completed: 'å·²å®Œæˆ',
+  cancelled: 'å·²å–æ¶ˆ'
 }
 
 const loadRequests = async () => {
@@ -28,7 +28,7 @@ const loadRequests = async () => {
   try {
     requests.value = await teacherApi.getRequests()
   } catch (error) {
-    feedback.value = (error as Error).message || 'ÇëÇóÁĞ±í¼ÓÔØÊ§°Ü'
+    feedback.value = (error as Error).message || 'è¯·æ±‚åˆ—è¡¨åŠ è½½å¤±è´¥'
   } finally {
     loading.value = false
   }
@@ -41,7 +41,7 @@ const accept = async (id: number) => {
     await teacherApi.acceptRequest(id)
     await loadRequests()
   } catch (error) {
-    feedback.value = (error as Error).message || '½Óµ¥Ê§°Ü'
+    feedback.value = (error as Error).message || 'æ¥å•å¤±è´¥'
   } finally {
     actioningId.value = null
   }
@@ -54,7 +54,7 @@ const release = async (id: number) => {
     await teacherApi.releaseRequest(id)
     await loadRequests()
   } catch (error) {
-    feedback.value = (error as Error).message || 'ÊÍ·ÅÊ§°Ü'
+    feedback.value = (error as Error).message || 'é‡Šæ”¾å¤±è´¥'
   } finally {
     actioningId.value = null
   }
@@ -67,7 +67,7 @@ const markCompleted = async (id: number) => {
     await teacherApi.updateRequestStatus(id, 'completed')
     await loadRequests()
   } catch (error) {
-    feedback.value = (error as Error).message || '¸üĞÂ×´Ì¬Ê§°Ü'
+    feedback.value = (error as Error).message || 'æ›´æ–°çŠ¶æ€å¤±è´¥'
   } finally {
     actioningId.value = null
   }
@@ -80,19 +80,19 @@ onMounted(loadRequests)
   <section class="page">
     <header class="card header">
       <div>
-        <h1>ÊÕµ½µÄÇëÇó</h1>
-        <p>´¦ÀíÆ¥Åä³ØÖĞµÄĞèÇó£¬¼°Ê±ÏìÓ¦¿ÉÌáÉıºóĞøÆØ¹â¡£</p>
+        <h1>æ”¶åˆ°çš„è¯·æ±‚</h1>
+        <p>å¤„ç†åŒ¹é…æ± ä¸­çš„éœ€æ±‚ï¼ŒåŠæ—¶å“åº”å¯æå‡åç»­æ›å…‰ã€‚</p>
       </div>
     </header>
 
     <article class="card tabs" v-if="!loading">
-      <button :class="{ active: tab === 'all' }" @click="tab = 'all'">È«²¿</button>
-      <button :class="{ active: tab === 'mine' }" @click="tab = 'mine'">ÎÒÒÑ½Óµ¥</button>
-      <button :class="{ active: tab === 'pool' }" @click="tab = 'pool'">¿É½Óµ¥³Ø</button>
+      <button :class="{ active: tab === 'all' }" @click="tab = 'all'">å…¨éƒ¨</button>
+      <button :class="{ active: tab === 'mine' }" @click="tab = 'mine'">æˆ‘å·²æ¥å•</button>
+      <button :class="{ active: tab === 'pool' }" @click="tab = 'pool'">å¯æ¥å•æ± </button>
     </article>
 
     <article class="card" v-if="loading">
-      <p>ÇëÇó¼ÓÔØÖĞ...</p>
+      <p>è¯·æ±‚åŠ è½½ä¸­...</p>
     </article>
 
     <div class="list" v-else-if="filtered.length > 0">
@@ -102,30 +102,30 @@ onMounted(loadRequests)
           <span class="status">{{ statusLabel[item.status] || item.status }}</span>
         </div>
         <div class="meta">
-          <p><span>¼Ò³¤£º</span>{{ item.parentName }}</p>
-          <p><span>¿ÆÄ¿£º</span>{{ item.subject }}</p>
-          <p><span>Äê¼¶£º</span>{{ item.grade }}</p>
-          <p><span>Ô¤Ëã£º</span>{{ item.budget }}</p>
-          <p><span>Ê±¼ä£º</span>{{ item.schedule }}</p>
-          <p><span>·¢²¼Ê±¼ä£º</span>{{ item.createdAt }}</p>
+          <p><span>å®¶é•¿ï¼š</span>{{ item.parentName }}</p>
+          <p><span>ç§‘ç›®ï¼š</span>{{ item.subject }}</p>
+          <p><span>å¹´çº§ï¼š</span>{{ item.grade }}</p>
+          <p><span>é¢„ç®—ï¼š</span>{{ item.budget }}</p>
+          <p><span>æ—¶é—´ï¼š</span>{{ item.schedule }}</p>
+          <p><span>å‘å¸ƒæ—¶é—´ï¼š</span>{{ item.createdAt }}</p>
         </div>
 
         <div class="actions">
           <button class="btn" v-if="!item.isMine && (item.status === 'pending' || item.status === 'matching')" :disabled="actioningId === item.id" @click="accept(item.id)">
-            {{ actioningId === item.id ? '´¦ÀíÖĞ...' : '½Óµ¥' }}
+            {{ actioningId === item.id ? 'å¤„ç†ä¸­...' : 'æ¥å•' }}
           </button>
           <button class="btn-ghost" v-if="item.isMine && item.status !== 'completed'" :disabled="actioningId === item.id" @click="markCompleted(item.id)">
-            ±ê¼ÇÍê³É
+            æ ‡è®°å®Œæˆ
           </button>
           <button class="btn-danger" v-if="item.isMine && item.status !== 'completed'" :disabled="actioningId === item.id" @click="release(item.id)">
-            ·Å»ØÆ¥Åä³Ø
+            æ”¾å›åŒ¹é…æ± 
           </button>
         </div>
       </article>
     </div>
 
     <article class="card" v-else>
-      <p>µ±Ç°ÔİÎŞÆ¥ÅäÇëÇó¡£</p>
+      <p>å½“å‰æš‚æ— åŒ¹é…è¯·æ±‚ã€‚</p>
     </article>
 
     <p class="feedback" v-if="feedback">{{ feedback }}</p>

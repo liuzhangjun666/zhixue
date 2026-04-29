@@ -12,7 +12,7 @@ const load = async () => {
   try {
     analytics.value = await teacherApi.getAnalytics()
   } catch (error) {
-    feedback.value = (error as Error).message || 'Êı¾İ¼ÓÔØÊ§°Ü'
+    feedback.value = (error as Error).message || 'æ•°æ®åŠ è½½å¤±è´¥'
   } finally {
     loading.value = false
   }
@@ -24,42 +24,42 @@ onMounted(load)
 <template>
   <section class="page">
     <header class="card">
-      <h1>Êı¾İÖĞĞÄ</h1>
-      <p>¹Ø×¢ÆØ¹â¡¢ÏìÓ¦ºÍ×ª»¯£¬³ÖĞøÓÅ»¯½Óµ¥Ğ§ÂÊ¡£</p>
+      <h1>æ•°æ®ä¸­å¿ƒ</h1>
+      <p>å…³æ³¨æ›å…‰ã€å“åº”å’Œè½¬åŒ–ï¼ŒæŒç»­ä¼˜åŒ–æ¥å•æ•ˆç‡ã€‚</p>
     </header>
 
     <article class="card" v-if="loading">
-      <p>Êı¾İ¼ÓÔØÖĞ...</p>
+      <p>æ•°æ®åŠ è½½ä¸­...</p>
     </article>
 
     <div v-else-if="analytics" class="grid">
       <article class="card metric">
-        <span>±¾ÖÜä¯ÀÀ</span>
+        <span>æœ¬å‘¨æµè§ˆ</span>
         <strong>{{ analytics.weeklyViews }}</strong>
       </article>
       <article class="card metric">
-        <span>ÀúÊ·ä¯ÀÀ</span>
+        <span>å†å²æµè§ˆ</span>
         <strong>{{ analytics.totalViews }}</strong>
       </article>
       <article class="card metric">
-        <span>´ı´¦ÀíÇëÇó</span>
+        <span>å¾…å¤„ç†è¯·æ±‚</span>
         <strong>{{ analytics.pendingRequests }}</strong>
       </article>
       <article class="card metric">
-        <span>ÒÑÔ¼¿Î</span>
+        <span>å·²çº¦è¯¾</span>
         <strong>{{ analytics.scheduledRequests }}</strong>
       </article>
       <article class="card metric">
-        <span>ÒÑÍê³ÉÇëÇó</span>
+        <span>å·²å®Œæˆè¯·æ±‚</span>
         <strong>{{ analytics.completedRequests }}</strong>
       </article>
       <article class="card metric">
-        <span>ÏìÓ¦ÂÊ</span>
+        <span>å“åº”ç‡</span>
         <strong>{{ Math.round(analytics.responseRate * 100) }}%</strong>
       </article>
       <article class="card metric wide">
-        <span>ÆÀ¼ÛÍ³¼Æ</span>
-        <strong>{{ analytics.averageRating.toFixed(1) }} ·Ö / {{ analytics.totalReviews }} ÌõÆÀ¼Û</strong>
+        <span>è¯„ä»·ç»Ÿè®¡</span>
+        <strong>{{ analytics.averageRating.toFixed(1) }} åˆ† / {{ analytics.totalReviews }} æ¡è¯„ä»·</strong>
       </article>
     </div>
 

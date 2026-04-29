@@ -2,9 +2,11 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import GlassCard from '../components/GlassCard.vue'
+import { setAuthSession, teacherLogin, teacherRegister } from '../api/auth'
 
 const router = useRouter()
 const currentStep = ref(1)
+const isLoginMode = ref(false)
 
 // Form data
 const phone = ref('')
@@ -13,16 +15,79 @@ const password = ref('')
 
 const nickname = ref('')
 const gender = ref('')
+const subject = ref('')
 const exp = ref('')
+const loading = ref(false)
+const errorText = ref('')
+
+const switchToLogin = () => {
+  isLoginMode.value = true
+  currentStep.value = 1
+  errorText.value = ''
+}
+
+const switchToRegister = () => {
+  isLoginMode.value = false
+  currentStep.value = 1
+  errorText.value = ''
+}
 
 const nextStep = () => {
+  if (currentStep.value === 1 && (!phone.value || !password.value)) {
+    errorText.value = '请填写手机号和密码'
+    return
+  }
+  if (currentStep.value === 2 && (!nickname.value || !subject.value)) {
+    errorText.value = '请填写姓名和科目'
+    return
+  }
+  errorText.value = ''
   if (currentStep.value < 4) {
     currentStep.value++
   }
 }
 
-const finishRegister = () => {
-  router.push('/teacher-center')
+const finishRegister = async () => {
+  loading.value = true
+  errorText.value = ''
+  try {
+    const data = await teacherRegister({
+      phone: phone.value.trim(),
+      password: password.value,
+      nickname: nickname.value.trim(),
+      subject: subject.value.trim(),
+      experience: exp.value.trim()
+    })
+    if (!data?.token || !data?.user) throw new Error('注册返回数据不完整')
+    setAuthSession(data.token, data.user)
+    router.push('/teacher-center')
+  } catch (error) {
+    errorText.value = (error && error.message) || '提交失败，请稍后重试'
+  } finally {
+    loading.value = false
+  }
+}
+
+const handleTeacherLogin = async () => {
+  if (!phone.value || !password.value) {
+    errorText.value = '请填写手机号和密码'
+    return
+  }
+  loading.value = true
+  errorText.value = ''
+  try {
+    const data = await teacherLogin({
+      phone: phone.value.trim(),
+      password: password.value
+    })
+    if (!data?.token || !data?.user) throw new Error('登录返回数据不完整')
+    setAuthSession(data.token, data.user)
+    router.push('/teacher-center')
+  } catch (error) {
+    errorText.value = (error && error.message) || '登录失败，请稍后重试'
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 
@@ -50,6 +115,32 @@ const finishRegister = () => {
     <!-- 右侧注册表单 -->
     <div class="form-section">
       <GlassCard maxWidth="420px">
+        <div class="mode-switch mb-4">
+          <button class="mode-btn" :class="{ active: !isLoginMode }" @click="switchToRegister">老师入驻</button>
+          <button class="mode-btn" :class="{ active: isLoginMode }" @click="switchToLogin">已有账号登录</button>
+        </div>
+
+        <div v-if="isLoginMode" class="step-content">
+          <form @submit.prevent="handleTeacherLogin">
+            <div class="input-group">
+              <div class="input-wrapper">
+                <input type="tel" v-model="phone" class="input-field" placeholder="手机号" required>
+              </div>
+            </div>
+
+            <div class="input-group">
+              <div class="input-wrapper">
+                <input type="password" v-model="password" class="input-field" placeholder="密码" required>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-teacher w-100 mt-4" :disabled="loading">
+              {{ loading ? '登录中...' : '登录老师中心' }}
+            </button>
+          </form>
+        </div>
+
+        <template v-else>
         <!-- 步骤指示器 -->
         <div class="step-indicator mb-4">
           <div class="step" :class="{ active: currentStep >= 1, completed: currentStep > 1 }">
@@ -118,6 +209,18 @@ const finishRegister = () => {
                 <option value="female">女</option>
               </select>
             </div>
+
+            <div class="input-group">
+              <div class="input-wrapper">
+                <input type="text" v-model="subject" class="input-field" placeholder="擅长科目（如数学）" required>
+              </div>
+            </div>
+
+            <div class="input-group">
+              <div class="input-wrapper">
+                <input type="text" v-model="exp" class="input-field" placeholder="教学经验（如3年）">
+              </div>
+            </div>
             
             <button type="submit" class="btn btn-teacher w-100 mt-4">下一步</button>
           </form>
@@ -142,11 +245,19 @@ const finishRegister = () => {
           <div class="success-icon mb-3">✅</div>
           <h2 class="mb-2">入驻成功！</h2>
           <p class="text-sub mb-4">您的资料已提交，去完善更多信息提升曝光率吧。</p>
-          <button @click="finishRegister" class="btn btn-teacher w-100">前往个人中心</button>
+          <button @click="finishRegister" class="btn btn-teacher w-100" :disabled="loading">
+            {{ loading ? '提交中...' : '前往个人中心' }}
+          </button>
         </div>
+        </template>
+
+        <p v-if="errorText" class="error-text mt-3">{{ errorText }}</p>
         
-        <div v-if="currentStep === 1" class="text-center mt-4 text-sub">
-          已有老师账号？ <router-link to="/login" class="text-teacher">立即登录</router-link>
+        <div v-if="!isLoginMode && currentStep === 1" class="text-center mt-4 text-sub">
+          已有老师账号？ <button class="inline-link-btn text-teacher" @click="switchToLogin">立即登录</button>
+        </div>
+        <div v-if="isLoginMode" class="text-center mt-4 text-sub">
+          还没有老师账号？ <button class="inline-link-btn text-teacher" @click="switchToRegister">去入驻</button>
         </div>
       </GlassCard>
     </div>
@@ -255,6 +366,28 @@ const finishRegister = () => {
   background: var(--color-teacher);
 }
 
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.mode-btn {
+  border: 1px solid var(--color-border);
+  background: white;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--color-text-sub);
+}
+
+.mode-btn.active {
+  border-color: var(--color-teacher);
+  color: var(--color-teacher);
+  background: rgba(16, 168, 129, 0.08);
+}
+
 /* 注册特有样式 */
 .w-100 { width: 100%; }
 .text-center { text-align: center; }
@@ -334,4 +467,16 @@ const finishRegister = () => {
 .border-0 { border: none !important; }
 
 .success-icon { font-size: 64px; }
+.error-text {
+  color: #e11d48;
+  font-size: 13px;
+}
+
+.inline-link-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-size: inherit;
+}
 </style>

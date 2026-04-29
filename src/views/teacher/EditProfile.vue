@@ -6,8 +6,8 @@ const loading = ref(false)
 const saving = ref(false)
 const feedback = ref('')
 
-const subjects = ['ÓïÎÄ', 'ÊıÑ§', 'Ó¢Óï', 'ÎïÀí', '»¯Ñ§', 'ÉúÎï']
-const grades = ['Ğ¡Ñ§', '³õÖĞ', '¸ßÖĞ']
+const subjects = ['è¯­æ–‡', 'æ•°å­¦', 'è‹±è¯­', 'ç‰©ç†', 'åŒ–å­¦', 'ç”Ÿç‰©']
+const grades = ['å°å­¦', 'åˆä¸­', 'é«˜ä¸­']
 
 const form = reactive({
   teacherName: '',
@@ -39,7 +39,7 @@ const loadProfile = async () => {
     form.preferredSubjects = Array.isArray(data.preferredSubjects) ? [...data.preferredSubjects] : []
     form.preferredGrades = Array.isArray(data.preferredGrades) ? [...data.preferredGrades] : []
   } catch (error) {
-    feedback.value = (error as Error).message || '¼ÓÔØÀÏÊ¦×ÊÁÏÊ§°Ü'
+    feedback.value = (error as Error).message || 'åŠ è½½è€å¸ˆèµ„æ–™å¤±è´¥'
   } finally {
     loading.value = false
   }
@@ -47,7 +47,7 @@ const loadProfile = async () => {
 
 const saveProfile = async () => {
   if (!form.teacherName.trim() || !/^1\d{10}$/.test(form.phone)) {
-    feedback.value = 'ÇëÌîĞ´ÕıÈ·µÄĞÕÃûºÍÊÖ»úºÅ'
+    feedback.value = 'è¯·å¡«å†™æ­£ç¡®çš„å§“åå’Œæ‰‹æœºå·'
     return
   }
 
@@ -55,9 +55,9 @@ const saveProfile = async () => {
   feedback.value = ''
   try {
     await teacherApi.updateProfile({ ...form })
-    feedback.value = '×ÊÁÏÒÑ±£´æ'
+    feedback.value = 'èµ„æ–™å·²ä¿å­˜'
   } catch (error) {
-    feedback.value = (error as Error).message || '±£´æÊ§°Ü£¬ÇëÉÔºóÖØÊÔ'
+    feedback.value = (error as Error).message || 'ä¿å­˜å¤±è´¥ï¼Œè¯·ç¨åé‡è¯•'
   } finally {
     saving.value = false
   }
@@ -70,39 +70,39 @@ onMounted(loadProfile)
   <section class="page">
     <header class="card header">
       <div>
-        <h1>±à¼­×ÊÁÏ</h1>
-        <p>ÍêÉÆ¸öÈËĞÅÏ¢ÓĞÖúÓÚÌá¸ßÆ¥Åä×¼È·¶ÈºÍ×ª»¯ÂÊ¡£</p>
+        <h1>ç¼–è¾‘èµ„æ–™</h1>
+        <p>å®Œå–„ä¸ªäººä¿¡æ¯æœ‰åŠ©äºæé«˜åŒ¹é…å‡†ç¡®åº¦å’Œè½¬åŒ–ç‡ã€‚</p>
       </div>
-      <button class="btn-primary" :disabled="saving" @click="saveProfile">{{ saving ? '±£´æÖĞ...' : '±£´æ×ÊÁÏ' }}</button>
+      <button class="btn-primary" :disabled="saving" @click="saveProfile">{{ saving ? 'ä¿å­˜ä¸­...' : 'ä¿å­˜èµ„æ–™' }}</button>
     </header>
 
     <article class="card" v-if="loading">
-      <p>×ÊÁÏ¼ÓÔØÖĞ...</p>
+      <p>èµ„æ–™åŠ è½½ä¸­...</p>
     </article>
 
     <article class="card" v-else>
       <div class="grid">
         <label>
-          ĞÕÃû
+          å§“å
           <input v-model="form.teacherName" type="text" />
         </label>
         <label>
-          ÊÖ»úºÅ
+          æ‰‹æœºå·
           <input v-model="form.phone" type="tel" maxlength="11" />
         </label>
         <label>
-          ³ÇÊĞ
+          åŸå¸‚
           <input v-model="form.city" type="text" />
         </label>
         <label class="full">
-          ¸öÈË¼ò½é
-          <textarea v-model="form.bio" rows="4" placeholder="½éÉÜ½ÌÑ§¾­Ñé¡¢ÉÃ³¤Ìá·Ö·½Ïò¡¢ÊÚ¿Î·ç¸ñ"></textarea>
+          ä¸ªäººç®€ä»‹
+          <textarea v-model="form.bio" rows="4" placeholder="ä»‹ç»æ•™å­¦ç»éªŒã€æ“…é•¿æåˆ†æ–¹å‘ã€æˆè¯¾é£æ ¼"></textarea>
         </label>
       </div>
     </article>
 
     <article class="card">
-      <h2>ÉÃ³¤¿ÆÄ¿</h2>
+      <h2>æ“…é•¿ç§‘ç›®</h2>
       <div class="chips">
         <button
           v-for="item in subjects"
@@ -117,7 +117,7 @@ onMounted(loadProfile)
     </article>
 
     <article class="card">
-      <h2>ÊÚ¿ÎÑ§¶Î</h2>
+      <h2>æˆè¯¾å­¦æ®µ</h2>
       <div class="chips">
         <button
           v-for="item in grades"
