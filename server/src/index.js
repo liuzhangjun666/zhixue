@@ -20,6 +20,15 @@ const ALLOWED_ORIGINS = (
 const DEFAULT_AUTH_TOKEN_SECRET = 'zhixue-dev-secret-change-me'
 const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || DEFAULT_AUTH_TOKEN_SECRET
 const AUTH_TOKEN_EXPIRES_IN_SECONDS = Number(process.env.AUTH_TOKEN_EXPIRES_IN_SECONDS || 60 * 60 * 24 * 7)
+const SMS_CODE_TTL_SECONDS = 300
+const smsCodeStore = new Map()
+const SMS_PROVIDER = String(process.env.SMS_PROVIDER || 'mock').trim().toLowerCase()
+const SMS_WEBHOOK_URL = String(process.env.SMS_WEBHOOK_URL || '').trim()
+const SMS_WEBHOOK_TOKEN = String(process.env.SMS_WEBHOOK_TOKEN || '').trim()
+const SMS_SIGN_NAME = String(process.env.SMS_SIGN_NAME || '知学空间').trim()
+const SMS_VERIFY_TEMPLATE = String(process.env.SMS_VERIFY_TEMPLATE || 'VERIFY_CODE').trim()
+const SMS_RENEW_TEMPLATE = String(process.env.SMS_RENEW_TEMPLATE || 'AUTO_RENEW_REMINDER').trim()
+const SMS_TIMEOUT_MS = Math.max(1000, Number(process.env.SMS_TIMEOUT_MS || 5000))
 
 if (process.env.NODE_ENV === 'production' && AUTH_TOKEN_SECRET === DEFAULT_AUTH_TOKEN_SECRET) {
   throw new Error('AUTH_TOKEN_SECRET must be set in production')
@@ -94,15 +103,20 @@ const signPayload = (payload) => crypto.createHmac('sha256', AUTH_TOKEN_SECRET).
 
 const issueToken = (user) => {
   const now = Math.floor(Date.now() / 1000)
+  const exp = now + AUTH_TOKEN_EXPIRES_IN_SECONDS
   const payload = Buffer.from(
     JSON.stringify({
       id: Number(user.id),
       role: user.role,
       iat: now,
-      exp: now + AUTH_TOKEN_EXPIRES_IN_SECONDS
+      exp
     })
   ).toString('base64url')
-  return `${payload}.${signPayload(payload)}`
+  return {
+    token: `${payload}.${signPayload(payload)}`,
+    tokenExpiresIn: AUTH_TOKEN_EXPIRES_IN_SECONDS,
+    tokenExpiresAt: new Date(exp * 1000).toISOString()
+  }
 }
 
 const verifyToken = (token) => {
@@ -137,15 +151,121 @@ const getUserByPhone = async (phone, role) => {
   return rows[0] || null
 }
 
-const buildAuthPayload = (user) => ({
-  user: {
-    id: Number(user.id),
-    role: user.role,
-    nickname: user.nickname,
-    phone: user.phone
-  },
-  token: issueToken(user)
-})
+const createSmsKey = (role, phone) => `${role}:${String(phone || '').trim()}`
+const issueSmsCode = (role, phone) => {
+  const key = createSmsKey(role, phone)
+  if (!key.endsWith(':')) {
+    const code = String(Math.floor(100000 + Math.random() * 900000))
+    smsCodeStore.set(key, {
+      code,
+      expiresAt: Date.now() + SMS_CODE_TTL_SECONDS * 1000
+    })
+    return code
+  }
+  return ''
+}
+
+const verifySmsCode = (role, phone, code) => {
+  const key = createSmsKey(role, phone)
+  const payload = smsCodeStore.get(key)
+  if (!payload) return false
+  if (payload.expiresAt < Date.now()) {
+    smsCodeStore.delete(key)
+    return false
+  }
+  if (String(payload.code) !== String(code || '')) return false
+  smsCodeStore.delete(key)
+  return true
+}
+
+const maskPhone = (phone) => {
+  const text = String(phone || '').trim()
+  if (text.length < 7) return text
+  return `${text.slice(0, 3)}****${text.slice(-4)}`
+}
+
+const sendSms = async ({ phone, templateCode, templateParams, messageType }) => {
+  const normalizedPhone = String(phone || '').replace(/\s+/g, '')
+  if (!normalizedPhone) return { sent: false, reason: 'missing phone' }
+
+  if (!SMS_WEBHOOK_URL || SMS_PROVIDER === 'mock') {
+    console.log(
+      `[sms][mock] type=${messageType} phone=${maskPhone(normalizedPhone)} template=${templateCode} params=${JSON.stringify(templateParams)}`
+    )
+    return { sent: true, mock: true }
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), SMS_TIMEOUT_MS)
+  try {
+    const response = await fetch(SMS_WEBHOOK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(SMS_WEBHOOK_TOKEN ? { Authorization: `Bearer ${SMS_WEBHOOK_TOKEN}` } : {})
+      },
+      body: JSON.stringify({
+        provider: SMS_PROVIDER,
+        signName: SMS_SIGN_NAME,
+        phone: normalizedPhone,
+        templateCode,
+        templateParams,
+        messageType
+      }),
+      signal: controller.signal
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      return { sent: false, reason: `http ${response.status}${text ? ` ${text}` : ''}` }
+    }
+    return { sent: true, mock: false }
+  } catch (error) {
+    return { sent: false, reason: error?.message || 'unknown error' }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+const sendVerificationSms = async (role, phone, code) => {
+  const result = await sendSms({
+    phone,
+    templateCode: SMS_VERIFY_TEMPLATE,
+    templateParams: { code, ttlMinutes: Math.floor(SMS_CODE_TTL_SECONDS / 60) },
+    messageType: `${role}_register_verify`
+  })
+  if (!result.sent) {
+    console.error(`[sms] failed to send verify code for ${role}:`, result.reason)
+  }
+  return result
+}
+
+const sendMembershipRenewReminder = async ({ userId, phone, nickname, planName, expireAt }) => {
+  const result = await sendSms({
+    phone,
+    templateCode: SMS_RENEW_TEMPLATE,
+    templateParams: { nickname: nickname || '用户', planName, expireAt },
+    messageType: 'membership_renew_reminder'
+  })
+  if (!result.sent) {
+    console.error(`[sms] failed to send renew reminder userId=${userId}:`, result.reason)
+  }
+  return result
+}
+
+const buildAuthPayload = (user) => {
+  const issued = issueToken(user)
+  return {
+    user: {
+      id: Number(user.id),
+      role: user.role,
+      nickname: user.nickname,
+      phone: user.phone
+    },
+    token: issued.token,
+    tokenExpiresIn: issued.tokenExpiresIn,
+    tokenExpiresAt: issued.tokenExpiresAt
+  }
+}
 
 const ensureTeacherProfile = async (user) => {
   const [rows] = await pool.query('SELECT * FROM teacher_profiles WHERE user_id = ? LIMIT 1', [user.id])
@@ -227,6 +347,7 @@ const ensureColumn = async (tableName, columnName, ddl) => {
 
 const ensureMatchingSchema = async () => {
   await ensureColumn('requests', 'description', 'description TEXT')
+  await ensureColumn('memberships', 'renew_reminder_sent_at', 'renew_reminder_sent_at DATETIME NULL')
   await ensureColumn('matches', 'parent_accept_status', "parent_accept_status ENUM('pending','accepted','rejected') NOT NULL DEFAULT 'pending'")
   await ensureColumn('matches', 'teacher_accept_status', "teacher_accept_status ENUM('pending','accepted','rejected') NOT NULL DEFAULT 'pending'")
   await ensureColumn('matches', 'unlock_granted', 'unlock_granted TINYINT(1) NOT NULL DEFAULT 0')
@@ -438,6 +559,51 @@ const runWeeklyMatching = async () => {
   return { success: true, generated: Number(result.generated || 0), ranAt: new Date().toISOString() }
 }
 
+const runRenewReminderJob = async () => {
+  const [rows] = await pool.query(
+    `SELECT m.id, m.user_id, m.plan_name, m.expire_at, u.phone, u.nickname
+       FROM memberships m
+       JOIN users u ON u.id = m.user_id
+      WHERE m.auto_renew = TRUE
+        AND m.expire_at IS NOT NULL
+        AND DATE(m.expire_at) = DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+        AND m.renew_reminder_sent_at IS NULL`
+  )
+  if (!rows.length) return { checked: 0, sent: 0 }
+
+  let sent = 0
+  for (const row of rows) {
+    const result = await sendMembershipRenewReminder({
+      userId: Number(row.user_id),
+      phone: row.phone,
+      nickname: row.nickname,
+      planName: row.plan_name,
+      expireAt: toDate(row.expire_at)
+    })
+    if (result.sent) {
+      await pool.query('UPDATE memberships SET renew_reminder_sent_at = NOW() WHERE id = ?', [row.id])
+      sent += 1
+    }
+  }
+  return { checked: rows.length, sent }
+}
+
+let runningRenewReminderJob = false
+const maybeRunRenewReminderJob = async () => {
+  if (runningRenewReminderJob) return
+  runningRenewReminderJob = true
+  try {
+    const result = await runRenewReminderJob()
+    if (result.checked > 0) {
+      console.log(`[sms] renew reminder checked=${result.checked}, sent=${result.sent}`)
+    }
+  } catch (error) {
+    console.error('[sms] renew reminder job failed:', error?.message || error)
+  } finally {
+    runningRenewReminderJob = false
+  }
+}
+
 let lastWeeklyMatchKey = ''
 const maybeRunScheduledMatching = async () => {
   const now = new Date()
@@ -478,7 +644,10 @@ app.post('/api/auth/parent/register', async (req, res) => {
   const phone = String(req.body?.phone || '').trim()
   const password = String(req.body?.password || '')
   const nickname = String(req.body?.nickname || '').trim()
+  const code = String(req.body?.code || '').trim()
   if (!phone || !password || !nickname) return fail(res, 400, 'phone, password and nickname are required')
+  if (!code) return fail(res, 400, 'code is required')
+  if (!verifySmsCode('parent', phone, code)) return fail(res, 400, '验证码错误或已过期')
   if (password.length < 6) return fail(res, 400, 'password must be at least 6 chars')
   try {
     const [exists] = await pool.query('SELECT id FROM users WHERE phone = ? LIMIT 1', [phone])
@@ -501,6 +670,19 @@ app.post('/api/auth/parent/register', async (req, res) => {
   }
 })
 
+app.post('/api/auth/parent/send-code', async (req, res) => {
+  const phone = String(req.body?.phone || '').trim()
+  if (!phone) return fail(res, 400, 'phone is required')
+  const debugCode = issueSmsCode('parent', phone)
+  const smsResult = await sendVerificationSms('parent', phone, debugCode)
+  if (!smsResult.sent) return fail(res, 500, '短信发送失败，请稍后重试')
+  ok(res, {
+    sent: true,
+    ttlSeconds: SMS_CODE_TTL_SECONDS,
+    debugCode: process.env.NODE_ENV === 'production' ? undefined : debugCode
+  })
+})
+
 app.post('/api/auth/parent/login', async (req, res) => {
   const phone = String(req.body?.phone || '').trim()
   const password = String(req.body?.password || '')
@@ -520,7 +702,10 @@ app.post('/api/auth/teacher/register', async (req, res) => {
   const nickname = String(req.body?.nickname || '').trim()
   const subject = String(req.body?.subject || '').trim()
   const experience = String(req.body?.experience || '').trim()
+  const code = String(req.body?.code || '').trim()
   if (!phone || !password || !nickname) return fail(res, 400, 'phone, password and nickname are required')
+  if (!code) return fail(res, 400, 'code is required')
+  if (!verifySmsCode('teacher', phone, code)) return fail(res, 400, '验证码错误或已过期')
   if (password.length < 6) return fail(res, 400, 'password must be at least 6 chars')
 
   const conn = await pool.getConnection()
@@ -586,7 +771,18 @@ app.get('/api/auth/me', authRequired(), async (req, res) => {
 app.post('/api/auth/logout', authRequired(), (_req, res) => ok(res, { success: true }, '退出成功'))
 
 // Compatibility teacher auth
-app.post('/api/teacher/auth/send-code', async (_req, res) => ok(res, { sent: true, ttlSeconds: 300 }))
+app.post('/api/teacher/auth/send-code', async (req, res) => {
+  const phone = String(req.body?.phone || '').trim()
+  if (!phone) return fail(res, 400, 'phone is required')
+  const debugCode = issueSmsCode('teacher', phone)
+  const smsResult = await sendVerificationSms('teacher', phone, debugCode)
+  if (!smsResult.sent) return fail(res, 500, '短信发送失败，请稍后重试')
+  ok(res, {
+    sent: true,
+    ttlSeconds: SMS_CODE_TTL_SECONDS,
+    debugCode: process.env.NODE_ENV === 'production' ? undefined : debugCode
+  })
+})
 app.post('/api/teacher/auth/register', async (req, res) => {
   req.url = '/api/auth/teacher/register'
   app._router.handle(req, res, () => {})
@@ -614,6 +810,7 @@ app.get('/api/parent/profile', authRequired('parent'), async (req, res) => {
       city: user.city || '',
       bio: user.bio || '',
       avatar: user.avatar || '',
+      createdAt: toDate(user.created_at),
       preferredGrade: user.preferred_grade || '',
       preferredSubjects: parseArrayField(user.preferred_subjects),
       children: children.map((c) => ({ id: Number(c.id), name: c.name, grade: c.grade, targetSubject: c.target_subject }))
@@ -703,20 +900,30 @@ app.patch('/api/parent/requests/:id/status', authRequired('parent'), async (req,
 })
 
 app.get('/api/parent/reviews', authRequired('parent'), async (req, res) => {
-  const [rows] = await pool.query('SELECT * FROM reviews WHERE parent_id = ? ORDER BY created_at DESC', [req.user.id])
-  ok(
-    res,
-    rows.map((r) => ({ id: Number(r.id), teacherName: r.teacher_name, subject: r.subject, rating: Number(r.rating || 0), content: r.content || '', reply: r.reply || '', date: toDate(r.created_at) }))
-  )
+  try {
+    const [rows] = await pool.query('SELECT * FROM reviews WHERE parent_id = ? ORDER BY created_at DESC', [req.user.id])
+    ok(
+      res,
+      rows.map((r) => ({ id: Number(r.id), teacherName: r.teacher_name, subject: r.subject, rating: Number(r.rating || 0), content: r.content || '', reply: r.reply || '', date: toDate(r.created_at) }))
+    )
+  } catch (error) {
+    if (isOptionalSchemaError(error)) return ok(res, [])
+    fail(res, 500, error.message)
+  }
 })
 
 app.post('/api/parent/reviews/:id/reply', authRequired('parent'), async (req, res) => {
   const id = Number(req.params.id)
   const reply = String(req.body?.reply || '').trim()
   if (!reply) return fail(res, 400, 'reply cannot be empty')
-  const [result] = await pool.query('UPDATE reviews SET reply = ? WHERE id = ? AND parent_id = ?', [reply, id, req.user.id])
-  if (!result.affectedRows) return fail(res, 404, 'Review not found')
-  ok(res, { id, reply })
+  try {
+    const [result] = await pool.query('UPDATE reviews SET reply = ? WHERE id = ? AND parent_id = ?', [reply, id, req.user.id])
+    if (!result.affectedRows) return fail(res, 404, 'Review not found')
+    ok(res, { id, reply })
+  } catch (error) {
+    if (isOptionalSchemaError(error)) return fail(res, 404, 'Review module not enabled')
+    fail(res, 500, error.message)
+  }
 })
 
 app.get('/api/parent/settings', authRequired('parent'), async (req, res) => {
@@ -832,20 +1039,38 @@ app.post('/api/teacher/verification/upload', authRequired('teacher'), async (req
   const certType = String(req.body?.certType || 'work_proof')
   const certUrl = String(req.body?.certUrl || '').trim()
   if (!certUrl) return fail(res, 400, 'certUrl is required')
-  await pool.query('INSERT INTO teacher_verifications (user_id, cert_type, cert_url, status) VALUES (?, ?, ?, ?)', [req.user.id, certType, certUrl, 'pending'])
-  await pool.query('UPDATE teacher_profiles SET verify_status=?, verify_remark=? WHERE user_id=?', ['pending', '', req.user.id])
-  ok(res, { submitted: true })
+  try {
+    await pool.query('INSERT INTO teacher_verifications (user_id, cert_type, cert_url, status) VALUES (?, ?, ?, ?)', [req.user.id, certType, certUrl, 'pending'])
+    await pool.query('UPDATE teacher_profiles SET verify_status=?, verify_remark=? WHERE user_id=?', ['pending', '', req.user.id])
+    ok(res, { submitted: true })
+  } catch (error) {
+    if (isOptionalSchemaError(error)) return fail(res, 404, 'Verification module not enabled')
+    if (String(error?.code || '') === 'ER_DATA_TOO_LONG') return fail(res, 400, '认证文件过大，请压缩后重试')
+    fail(res, 500, error.message)
+  }
 })
 
 app.get('/api/teacher/verification/status', authRequired('teacher'), async (req, res) => {
-  const [profileRows] = await pool.query('SELECT verify_status, verified, verify_remark FROM teacher_profiles WHERE user_id=?', [req.user.id])
-  const [certRows] = await pool.query('SELECT cert_type, cert_url, status, review_remark, created_at FROM teacher_verifications WHERE user_id=? ORDER BY created_at DESC', [req.user.id])
-  ok(res, {
-    verifyStatus: profileRows[0]?.verify_status || 'pending',
-    verified: !!profileRows[0]?.verified,
-    verifyRemark: profileRows[0]?.verify_remark || '',
-    certificates: certRows.map((c) => ({ certType: c.cert_type, certUrl: c.cert_url, status: c.status, reviewRemark: c.review_remark, createdAt: toISO(c.created_at) }))
-  })
+  try {
+    const [profileRows] = await pool.query('SELECT verify_status, verified, verify_remark FROM teacher_profiles WHERE user_id=?', [req.user.id])
+    const [certRows] = await pool.query('SELECT cert_type, cert_url, status, review_remark, created_at FROM teacher_verifications WHERE user_id=? ORDER BY created_at DESC', [req.user.id])
+    ok(res, {
+      verifyStatus: profileRows[0]?.verify_status || 'pending',
+      verified: !!profileRows[0]?.verified,
+      verifyRemark: profileRows[0]?.verify_remark || '',
+      certificates: certRows.map((c) => ({ certType: c.cert_type, certUrl: c.cert_url, status: c.status, reviewRemark: c.review_remark, createdAt: toISO(c.created_at) }))
+    })
+  } catch (error) {
+    if (isOptionalSchemaError(error)) {
+      return ok(res, {
+        verifyStatus: 'pending',
+        verified: false,
+        verifyRemark: '',
+        certificates: []
+      })
+    }
+    fail(res, 500, error.message)
+  }
 })
 
 app.post('/api/teacher/questionnaire', authRequired('teacher'), async (req, res) => {
@@ -913,36 +1138,51 @@ app.patch('/api/teacher/requests/:id/status', authRequired('teacher'), async (re
 })
 
 app.get('/api/teacher/reviews', authRequired('teacher'), async (req, res) => {
-  const user = await getUserById(req.user.id)
-  if (!user) return fail(res, 404, 'Teacher not found')
-  const [rows] = await pool.query(
-    `SELECT r.*, u.nickname AS parent_name
-       FROM reviews r
-       JOIN users u ON r.parent_id = u.id
-      WHERE r.teacher_name = ?
-      ORDER BY r.created_at DESC`,
-    [user.nickname]
-  )
-  ok(res, rows.map((r) => ({ id: Number(r.id), parentName: r.parent_name, subject: r.subject, rating: Number(r.rating || 0), content: r.content || '', date: toDate(r.created_at) })))
+  try {
+    const user = await getUserById(req.user.id)
+    if (!user) return fail(res, 404, 'Teacher not found')
+    const [rows] = await pool.query(
+      `SELECT r.*, u.nickname AS parent_name
+         FROM reviews r
+         JOIN users u ON r.parent_id = u.id
+        WHERE r.teacher_name = ?
+        ORDER BY r.created_at DESC`,
+      [user.nickname]
+    )
+    ok(res, rows.map((r) => ({ id: Number(r.id), parentName: r.parent_name, subject: r.subject, rating: Number(r.rating || 0), content: r.content || '', date: toDate(r.created_at) })))
+  } catch (error) {
+    if (isOptionalSchemaError(error)) return ok(res, [])
+    fail(res, 500, error.message)
+  }
 })
 
 app.get('/api/teacher/analytics', authRequired('teacher'), async (req, res) => {
-  const user = await getUserById(req.user.id)
-  if (!user) return fail(res, 404, 'Teacher not found')
-  const [requestRows] = await pool.query('SELECT status, COUNT(*) AS count FROM requests WHERE teacher_name=? GROUP BY status', [user.nickname])
-  const [reviewRows] = await pool.query('SELECT COUNT(*) AS total_reviews, AVG(rating) AS average_rating FROM reviews WHERE teacher_name=?', [user.nickname])
-  const counter = requestRows.reduce((acc, r) => ({ ...acc, [r.status]: Number(r.count || 0) }), {})
-  const total = Object.values(counter).reduce((sum, n) => sum + Number(n || 0), 0)
-  ok(res, {
-    weeklyViews: 120 + total * 18,
-    totalViews: (120 + total * 18) * 8,
-    pendingRequests: Number(counter.pending || 0) + Number(counter.matching || 0),
-    scheduledRequests: Number(counter.scheduled || 0),
-    completedRequests: Number(counter.completed || 0),
-    averageRating: Number(reviewRows[0]?.average_rating || 0),
-    totalReviews: Number(reviewRows[0]?.total_reviews || 0),
-    responseRate: total === 0 ? 0 : (Number(counter.completed || 0) + Number(counter.scheduled || 0)) / total
-  })
+  try {
+    const user = await getUserById(req.user.id)
+    if (!user) return fail(res, 404, 'Teacher not found')
+    const [requestRows] = await pool.query('SELECT status, COUNT(*) AS count FROM requests WHERE teacher_name=? GROUP BY status', [user.nickname])
+    let reviewRows = [{ total_reviews: 0, average_rating: 0 }]
+    try {
+      const [rows] = await pool.query('SELECT COUNT(*) AS total_reviews, AVG(rating) AS average_rating FROM reviews WHERE teacher_name=?', [user.nickname])
+      reviewRows = rows
+    } catch (error) {
+      if (!isOptionalSchemaError(error)) throw error
+    }
+    const counter = requestRows.reduce((acc, r) => ({ ...acc, [r.status]: Number(r.count || 0) }), {})
+    const total = Object.values(counter).reduce((sum, n) => sum + Number(n || 0), 0)
+    ok(res, {
+      weeklyViews: 120 + total * 18,
+      totalViews: (120 + total * 18) * 8,
+      pendingRequests: Number(counter.pending || 0) + Number(counter.matching || 0),
+      scheduledRequests: Number(counter.scheduled || 0),
+      completedRequests: Number(counter.completed || 0),
+      averageRating: Number(reviewRows[0]?.average_rating || 0),
+      totalReviews: Number(reviewRows[0]?.total_reviews || 0),
+      responseRate: total === 0 ? 0 : (Number(counter.completed || 0) + Number(counter.scheduled || 0)) / total
+    })
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
 })
 
 const mapMatchItem = (row) => ({
@@ -1171,28 +1411,41 @@ app.get('/api/teacher/unlock-records', authRequired('teacher'), async (req, res)
 })
 
 app.get('/api/teacher/dashboard/summary', authRequired('teacher'), async (req, res) => {
-  const [countRows] = await pool.query(
-    `SELECT
-        SUM(CASE WHEN status = 'new' THEN 1 ELSE 0 END) AS new_count,
-        SUM(CASE WHEN status = 'unlocked' THEN 1 ELSE 0 END) AS unlocked_count,
-        SUM(CASE WHEN status IN ('accepted','unlocked') THEN 1 ELSE 0 END) AS processing_count
-       FROM matches
-      WHERE teacher_id = ?`,
-    [req.user.id]
-  )
-  const [memberRows] = await pool.query('SELECT remaining_unlock FROM memberships WHERE user_id = ? LIMIT 1', [req.user.id])
-  const [reviewRows] = await pool.query('SELECT COUNT(*) AS total_reviews, AVG(rating) AS avg_rating FROM reviews WHERE teacher_name = (SELECT nickname FROM users WHERE id = ?)', [req.user.id])
-  const [unlockRows] = await pool.query('SELECT COUNT(*) AS total_unlock FROM contact_unlock_records WHERE teacher_id = ?', [req.user.id])
-  ok(res, {
-    newMatchCount: Number(countRows[0]?.new_count || 0),
-    unlockedMatchCount: Number(countRows[0]?.unlocked_count || 0),
-    processingRequestCount: Number(countRows[0]?.processing_count || 0),
-    remainingUnlock: Number(memberRows[0]?.remaining_unlock || 0),
-    integrityScore: Number(reviewRows[0]?.avg_rating || 0) ? Number((Number(reviewRows[0].avg_rating) * 20).toFixed(0)) : 80,
-    totalReviewCount: Number(reviewRows[0]?.total_reviews || 0),
-    totalUnlockCount: Number(unlockRows[0]?.total_unlock || 0),
-    totalViewCount: Number(countRows[0]?.new_count || 0) * 3 + Number(countRows[0]?.unlocked_count || 0) * 2
-  })
+  try {
+    const [countRows] = await pool.query(
+      `SELECT
+          SUM(CASE WHEN status = 'new' THEN 1 ELSE 0 END) AS new_count,
+          SUM(CASE WHEN status = 'unlocked' THEN 1 ELSE 0 END) AS unlocked_count,
+          SUM(CASE WHEN status IN ('accepted','unlocked') THEN 1 ELSE 0 END) AS processing_count
+         FROM matches
+        WHERE teacher_id = ?`,
+      [req.user.id]
+    )
+    const [memberRows] = await pool.query('SELECT remaining_unlock FROM memberships WHERE user_id = ? LIMIT 1', [req.user.id])
+    let reviewRows = [{ total_reviews: 0, avg_rating: 0 }]
+    try {
+      const [rows] = await pool.query(
+        'SELECT COUNT(*) AS total_reviews, AVG(rating) AS avg_rating FROM reviews WHERE teacher_name = (SELECT nickname FROM users WHERE id = ?)',
+        [req.user.id]
+      )
+      reviewRows = rows
+    } catch (error) {
+      if (!isOptionalSchemaError(error)) throw error
+    }
+    const [unlockRows] = await pool.query('SELECT COUNT(*) AS total_unlock FROM contact_unlock_records WHERE teacher_id = ?', [req.user.id])
+    ok(res, {
+      newMatchCount: Number(countRows[0]?.new_count || 0),
+      unlockedMatchCount: Number(countRows[0]?.unlocked_count || 0),
+      processingRequestCount: Number(countRows[0]?.processing_count || 0),
+      remainingUnlock: Number(memberRows[0]?.remaining_unlock || 0),
+      integrityScore: Number(reviewRows[0]?.avg_rating || 0) ? Number((Number(reviewRows[0].avg_rating) * 20).toFixed(0)) : 80,
+      totalReviewCount: Number(reviewRows[0]?.total_reviews || 0),
+      totalUnlockCount: Number(unlockRows[0]?.total_unlock || 0),
+      totalViewCount: Number(countRows[0]?.new_count || 0) * 3 + Number(countRows[0]?.unlocked_count || 0) * 2
+    })
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
 })
 
 app.get('/api/parent/matches', authRequired('parent'), async (req, res) => {
@@ -1258,7 +1511,7 @@ app.post('/api/parent/matches/:id/feedback', authRequired('parent'), async (req,
 
 // Membership
 app.get('/api/membership/status', authRequired(), async (req, res) => {
-  const [rows] = await pool.query('SELECT * FROM memberships WHERE user_id=?', [req.user.id])
+  const [rows] = await pool.query('SELECT * FROM memberships WHERE user_id=? ORDER BY id DESC LIMIT 1', [req.user.id])
   if (!rows.length) {
     const name = req.user.role === 'teacher' ? '普通老师' : '普通用户'
     return ok(res, { planName: name, expireAt: null, remainingUnlock: 0, weeklyPriorityQuota: 0 })
@@ -1308,7 +1561,8 @@ app.post('/api/membership/subscribe', authRequired(), async (req, res) => {
          expire_at=VALUES(expire_at),
          remaining_unlock=VALUES(remaining_unlock),
          weekly_priority_quota=VALUES(weekly_priority_quota),
-         auto_renew=VALUES(auto_renew)`,
+         auto_renew=VALUES(auto_renew),
+         renew_reminder_sent_at=NULL`,
       [req.user.id, expire, autoRenew]
     )
     return ok(res, { planName: '家长会员', expireAt: toDate(expire), remainingUnlock: 9999, unlimitedUnlock: true, weeklyPriorityQuota: 10, autoRenew })
@@ -1328,14 +1582,15 @@ app.post('/api/membership/subscribe', authRequired(), async (req, res) => {
        expire_at=VALUES(expire_at),
        remaining_unlock=VALUES(remaining_unlock),
        weekly_priority_quota=VALUES(weekly_priority_quota),
-       auto_renew=VALUES(auto_renew)`,
+       auto_renew=VALUES(auto_renew),
+       renew_reminder_sent_at=NULL`,
     [req.user.id, plan.name, expire, unlock, quota, autoRenew]
   )
   ok(res, { planName: plan.name, expireAt: toDate(expire), remainingUnlock: unlock, weeklyPriorityQuota: quota, autoRenew })
 })
 
 app.get('/api/teacher/membership/status', authRequired('teacher'), async (req, res) => {
-  const [rows] = await pool.query('SELECT * FROM memberships WHERE user_id=?', [req.user.id])
+  const [rows] = await pool.query('SELECT * FROM memberships WHERE user_id=? ORDER BY id DESC LIMIT 1', [req.user.id])
   if (!rows.length) return ok(res, { planName: '普通老师', expireAt: null, remainingUnlock: 0, weeklyPriorityQuota: 1, serviceFeePerUnlock: 5 })
   const m = rows[0]
   ok(res, { planName: m.plan_name, expireAt: m.expire_at ? toDate(m.expire_at) : null, remainingUnlock: Number(m.remaining_unlock || 0), weeklyPriorityQuota: Number(m.weekly_priority_quota || 0), serviceFeePerUnlock: 5, autoRenew: !!m.auto_renew })
@@ -1366,7 +1621,8 @@ app.post('/api/teacher/membership/subscribe', authRequired('teacher'), async (re
        expire_at=VALUES(expire_at),
        remaining_unlock=VALUES(remaining_unlock),
        weekly_priority_quota=VALUES(weekly_priority_quota),
-       auto_renew=VALUES(auto_renew)`,
+       auto_renew=VALUES(auto_renew),
+       renew_reminder_sent_at=NULL`,
     [req.user.id, plan.name, expire, plan.unlock, plan.quota, Boolean(req.body?.auto_renew)]
   )
   ok(res, { planName: plan.name, expireAt: toDate(expire), remainingUnlock: plan.unlock, weeklyPriorityQuota: plan.quota, autoRenew: Boolean(req.body?.auto_renew) })
@@ -1906,6 +2162,12 @@ setInterval(() => {
     console.error('[matching] scheduler error:', error?.message || error)
   })
 }, 60 * 1000)
+
+setInterval(() => {
+  maybeRunRenewReminderJob().catch((error) => {
+    console.error('[sms] scheduler error:', error?.message || error)
+  })
+}, 10 * 60 * 1000)
 
 ensureMatchingSchema()
   .catch((error) => {

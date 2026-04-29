@@ -19,6 +19,7 @@ const feedback = ref('')
 
 const showUnlockConfirm = ref(false)
 const showUnlockSuccess = ref(false)
+const showUpgradeModal = ref(false)
 const pendingTeacher = ref<DiscoverTeacherDTO | null>(null)
 const unlockContact = ref<{ phone: string; wechat: string; nickname: string }>({ phone: '', wechat: '', nickname: '' })
 const unlockConversationId = ref(0)
@@ -153,6 +154,10 @@ const goRequest = (teacher: DiscoverTeacherDTO) => {
 const contact = (teacher: DiscoverTeacherDTO) => {
   if (!isLoggedIn.value) return goLogin()
   if (!isParent.value) return
+  if (!unlockInfo.value.unlimitedUnlock && unlockInfo.value.remainingUnlock <= 0) {
+    showUpgradeModal.value = true
+    return
+  }
   pendingTeacher.value = teacher
   showUnlockConfirm.value = true
 }
@@ -173,7 +178,11 @@ const confirmContact = async () => {
     showUnlockConfirm.value = false
     showUnlockSuccess.value = true
   } catch (error) {
-    feedback.value = (error as Error).message || '创建会话失败'
+    const message = (error as Error).message || '创建会话失败'
+    feedback.value = message
+    if (message.includes('解锁次数已用完')) {
+      showUpgradeModal.value = true
+    }
     showUnlockConfirm.value = false
   }
 }
@@ -222,7 +231,7 @@ onMounted(async () => {
         <p class="unlock-title">解锁状态</p>
         <p class="unlock-desc">{{ unlockToneText }}</p>
       </div>
-      <button v-if="isParent && !unlockInfo.unlimitedUnlock && unlockInfo.remainingUnlock <= 0" class="btn-primary" @click="router.push('/parent/vip')">开通会员</button>
+      <button v-if="isParent && !unlockInfo.unlimitedUnlock && unlockInfo.remainingUnlock <= 0" class="btn-primary" @click="showUpgradeModal = true">开通会员</button>
       <button v-else-if="isLoggedIn && isParent" class="btn-ghost" :disabled="loadingUnlockInfo" @click="fetchUnlockInfo">刷新</button>
       <button v-else class="btn-ghost" @click="goLogin">去登录</button>
     </section>
@@ -371,6 +380,17 @@ onMounted(async () => {
       <template #footer>
         <button class="btn-ghost" @click="showUnlockSuccess = false">稍后</button>
         <button class="btn-primary" @click="goConversation">去聊天</button>
+      </template>
+    </Modal>
+
+    <Modal :show="showUpgradeModal" title="开通会员" @close="showUpgradeModal = false">
+      <div class="modal-body">
+        <p>你的免费解锁次数已用完（今日剩余 {{ unlockInfo.remainingUnlock }} 次）。</p>
+        <p>开通家长会员后可无限解锁老师联系方式，并获得优先匹配提醒。</p>
+      </div>
+      <template #footer>
+        <button class="btn-ghost" @click="showUpgradeModal = false">稍后再说</button>
+        <button class="btn-primary" @click="router.push('/parent/vip')">去开通</button>
       </template>
     </Modal>
   </section>

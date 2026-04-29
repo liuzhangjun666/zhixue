@@ -1,10 +1,9 @@
 <script setup>
-import { ref } from 'vue'
+import { onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GlassCard from '../components/GlassCard.vue'
 import { teacherApi } from '../api/teacher'
-import { teacherLogin, teacherRegister, setAuthSession } from '../api/auth'
-import { AUTH_TOKEN_STORAGE_KEY } from '../api/http'
+import { teacherLogin, teacherRegister, teacherSendCode, setAuthSession } from '../api/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -30,6 +29,10 @@ const certUrl = ref('')
 const feedback = ref('')
 const errorText = ref('')
 const loading = ref(false)
+const sendingCode = ref(false)
+const codeCountdown = ref(0)
+const devCodeHint = ref('')
+let codeTimer = null
 
 const targetPath = () => (typeof route.query.redirect === 'string' ? route.query.redirect : '/teacher-center')
 
@@ -64,47 +67,75 @@ const handleTeacherLogin = async () => {
   }
 }
 
+const clearCodeTimer = () => {
+  if (codeTimer) {
+    window.clearInterval(codeTimer)
+    codeTimer = null
+  }
+}
+
+const startCodeCountdown = (seconds = 60) => {
+  clearCodeTimer()
+  codeCountdown.value = seconds
+  codeTimer = window.setInterval(() => {
+    codeCountdown.value = Math.max(0, codeCountdown.value - 1)
+    if (codeCountdown.value <= 0) {
+      clearCodeTimer()
+    }
+  }, 1000)
+}
+
+const sendCode = async () => {
+  const normalizedPhone = phone.value.trim()
+  if (!normalizedPhone) {
+    errorText.value = '请先输入手机号'
+    return
+  }
+  sendingCode.value = true
+  errorText.value = ''
+  try {
+    const result = await teacherSendCode(normalizedPhone)
+    devCodeHint.value = result.debugCode ? `开发环境验证码：${result.debugCode}` : ''
+    startCodeCountdown(60)
+  } catch (error) {
+    errorText.value = error?.message || '验证码发送失败'
+  } finally {
+    sendingCode.value = false
+  }
+}
+
+const toggleTeachingMethod = (method) => {
+  if (teachingMethods.value.includes(method)) {
+    teachingMethods.value = teachingMethods.value.filter((item) => item !== method)
+    return
+  }
+  teachingMethods.value = [...teachingMethods.value, method]
+}
+
 const nextStep = async () => {
   feedback.value = ''
   if (currentStep.value === 1) {
-    try {
-      const data = await teacherRegister({
-        phone: phone.value,
-        password: password.value,
-        nickname: nickname.value || '新老师',
-        subject: subject.value,
-        experience: exp.value
-      })
-      if (data?.token && data?.user) {
-        setAuthSession(data.token, data.user)
-        teacherApi.setToken(data.token)
-      }
-    } catch (error) {
-      try {
-        const data = await teacherLogin({ phone: phone.value.trim(), password: password.value })
-        if (data?.token && data?.user) {
-          setAuthSession(data.token, data.user)
-          teacherApi.setToken(data.token)
-        }
-      } catch (e) {
-        feedback.value = e?.message || error?.message || '老师注册失败'
-        return
-      }
-    }
-  }
-
-  if (currentStep.value === 3 && certUrl.value.trim()) {
-    try {
-      await teacherApi.submitVerification('teacher_license', certUrl.value.trim())
-    } catch (error) {
-      feedback.value = error?.message || '认证材料提交失败'
+    if (!phone.value.trim() || !password.value || !code.value.trim()) {
+      errorText.value = '请填写手机号、验证码和密码'
       return
     }
+    if (password.value.length < 6) {
+      errorText.value = '密码至少 6 位'
+      return
+    }
+    errorText.value = ''
+    currentStep.value = 2
+    return
   }
 
-  errorText.value = ''
-  if (currentStep.value < 4) {
-    currentStep.value += 1
+  if (currentStep.value === 2) {
+    if (!nickname.value.trim() || !subject.value.trim()) {
+      errorText.value = '请至少填写姓名和擅长科目'
+      return
+    }
+    errorText.value = ''
+    currentStep.value = 3
+    return
   }
 }
 
@@ -133,13 +164,44 @@ const handleCertFileChange = async (event) => {
 }
 
 const finishRegister = async () => {
-  const token = typeof window !== 'undefined' ? window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) : ''
-  if (!token) {
-    feedback.value = '登录状态失效，请重新登录'
-    return
+  loading.value = true
+  feedback.value = ''
+  errorText.value = ''
+  try {
+    const data = await teacherRegister({
+      phone: phone.value.trim(),
+      password: password.value,
+      code: code.value.trim(),
+      nickname: nickname.value.trim(),
+      subject: subject.value.trim(),
+      experience: exp.value.trim(),
+      gender: gender.value || undefined,
+      teachingMethods: teachingMethods.value,
+      feeRange: feeRange.value,
+      school: school.value.trim(),
+      inviteCode: inviteCode.value.trim() || undefined,
+      certType: certType.value,
+      certUrl: certUrl.value.trim() || undefined
+    })
+    if (!data?.token || !data?.user) {
+      throw new Error('注册返回数据不完整')
+    }
+    setAuthSession(data.token, data.user)
+    teacherApi.setToken(data.token)
+    if (certUrl.value.trim()) {
+      await teacherApi.submitVerification(certType.value, certUrl.value.trim())
+    }
+    router.push(targetPath())
+  } catch (error) {
+    errorText.value = error?.message || '老师注册失败'
+  } finally {
+    loading.value = false
   }
-  router.push(targetPath())
 }
+
+onUnmounted(() => {
+  clearCodeTimer()
+})
 </script>
 
 <template>
@@ -332,7 +394,7 @@ const finishRegister = async () => {
           <div v-if="currentStep === 4" class="step-content text-center">
             <div class="success-icon mb-3">✅</div>
             <h2 class="mb-2">已提交审核</h2>
-            <p class="text-sub mb-4">平台将在 1-3 个工作日完成审核，审核通过后可登录老师中心。</p>
+            <p class="text-sub mb-4">资料已提交成功，可直接使用老师中心，审核结果会在通知中心同步。</p>
             <button @click="switchToLogin" class="btn btn-teacher w-100">返回登录</button>
           </div>
         </template>

@@ -149,7 +149,7 @@ CREATE TABLE IF NOT EXISTS teacher_verifications (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
   cert_type ENUM('teacher_license','work_proof','id_card') NOT NULL,
-  cert_url TEXT NOT NULL,
+  cert_url LONGTEXT NOT NULL,
   status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
   review_remark VARCHAR(255) NOT NULL DEFAULT '',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

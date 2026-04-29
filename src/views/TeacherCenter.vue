@@ -13,6 +13,7 @@ interface MenuItem {
 
 const route = useRoute()
 const router = useRouter()
+const TEACHER_AVATAR_CACHE_KEY = 'zhixue_teacher_avatar_cache'
 
 const profile = ref<TeacherProfileDTO | null>(null)
 const membership = ref<TeacherMembershipStatusDTO | null>(null)
@@ -29,6 +30,24 @@ const summary = ref<DashboardSummaryDTO>({
 const invite = ref<TeacherInviteSummaryDTO>({ inviteCode: '', totalInvited: 0, verifiedInvited: 0, extraMatchQuota: 0 })
 const loading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
+
+const cachedAvatar = ref('')
+
+const loadCachedAvatar = () => {
+  if (typeof window === 'undefined') return ''
+  return window.localStorage.getItem(TEACHER_AVATAR_CACHE_KEY) || ''
+}
+
+const persistCachedAvatar = (value: string) => {
+  if (typeof window === 'undefined') return
+  if (!value) {
+    window.localStorage.removeItem(TEACHER_AVATAR_CACHE_KEY)
+    return
+  }
+  window.localStorage.setItem(TEACHER_AVATAR_CACHE_KEY, value)
+}
+
+const avatarSrc = computed(() => profile.value?.avatar || cachedAvatar.value || '')
 
 const menuItems: MenuItem[] = [
   { title: '编辑资料', icon: Edit3, path: '/teacher-center/edit' },
@@ -54,6 +73,10 @@ const loadData = async () => {
       teacherApi.getDashboardSummary()
     ])
     profile.value = profileData
+    if (profileData?.avatar) {
+      cachedAvatar.value = profileData.avatar
+      persistCachedAvatar(profileData.avatar)
+    }
     membership.value = membershipData
     summary.value = summaryData
     invite.value = await teacherApi.getInviteSummary()
@@ -89,6 +112,8 @@ const onFileChange = (event: Event) => {
     if (profile.value) {
       profile.value.avatar = base64
     }
+    cachedAvatar.value = base64
+    persistCachedAvatar(base64)
     try {
       await teacherApi.uploadAvatar(base64)
     } catch (error) {
@@ -103,7 +128,10 @@ const navigateTo = (path: string) => {
   router.push(path).catch(() => {})
 }
 
-onMounted(loadData)
+onMounted(() => {
+  cachedAvatar.value = loadCachedAvatar()
+  loadData()
+})
 </script>
 
 <template>
@@ -112,7 +140,8 @@ onMounted(loadData)
       <div class="teacher-card">
         <div class="profile-row">
           <div class="avatar" @click="triggerAvatarUpload">
-            <img :src="profile?.avatar || 'https://api.dicebear.com/7.x/adventurer/svg?seed=Teacher'" alt="avatar" />
+            <img v-if="avatarSrc" :src="avatarSrc" alt="avatar" />
+            <div v-else class="avatar-placeholder">头像</div>
             <div class="avatar-overlay">更换头像</div>
             <input ref="fileInput" type="file" accept="image/png, image/jpeg" class="hidden-input" @change="onFileChange" />
           </div>
@@ -240,6 +269,17 @@ onMounted(loadData)
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.avatar-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #9ca3af;
+  background: #f5f5f7;
 }
 
 .avatar-overlay {

@@ -54,10 +54,20 @@ const authHeaders = (token) => ({
 const run = async () => {
   console.log(`[smoke-core] API_BASE_URL=${API_BASE_URL}`)
 
+  const parentSendCode = await fetchJson('/api/auth/parent/send-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone: parentPhone })
+  })
+  assertOk(parentSendCode, '/api/auth/parent/send-code')
+  const parentCode = String(parentSendCode.payload?.data?.debugCode || '')
+  if (!parentCode) throw new Error('parent debug code missing')
+  console.log('[ok] parent send code')
+
   const parentRegister = await fetchJson('/api/auth/parent/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone: parentPhone, password, nickname: 'Core家长' })
+    body: JSON.stringify({ phone: parentPhone, password, nickname: 'Core家长', code: parentCode })
   })
   assertOk(parentRegister, '/api/auth/parent/register')
   console.log('[ok] parent register')
@@ -80,12 +90,23 @@ const run = async () => {
   assertOk(parentProfile, '/api/parent/profile')
   console.log('[ok] parent profile')
 
+  const teacherSendCode = await fetchJson('/api/teacher/auth/send-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone: teacherPhone })
+  })
+  assertOk(teacherSendCode, '/api/teacher/auth/send-code')
+  const teacherCode = String(teacherSendCode.payload?.data?.debugCode || '')
+  if (!teacherCode) throw new Error('teacher debug code missing')
+  console.log('[ok] teacher send code')
+
   const teacherRegister = await fetchJson('/api/auth/teacher/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       phone: teacherPhone,
       password,
+      code: teacherCode,
       nickname: 'Core老师',
       subject: '数学',
       experience: '2年'

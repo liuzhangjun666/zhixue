@@ -33,10 +33,19 @@ const authHeaders = (token) => ({
 const run = async () => {
   console.log(`[smoke] API_BASE_URL=${API_BASE_URL}`)
 
+  const parentSendCode = await requestJson('/api/auth/parent/send-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone: parentPhone })
+  })
+  const parentCode = String(parentSendCode.data?.debugCode || '')
+  if (!parentCode) throw new Error('parent debug code missing')
+  console.log('[ok] parent send code')
+
   const parentRegister = await requestJson('/api/auth/parent/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone: parentPhone, password, nickname: 'Smoke家长' })
+    body: JSON.stringify({ phone: parentPhone, password, nickname: 'Smoke家长', code: parentCode })
   })
   console.log('[ok] parent register')
 
@@ -56,12 +65,22 @@ const run = async () => {
   await requestJson('/api/parent/profile', { headers: authHeaders(parentToken) })
   console.log('[ok] parent profile')
 
+  const teacherSendCode = await requestJson('/api/teacher/auth/send-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone: teacherPhone })
+  })
+  const teacherCode = String(teacherSendCode.data?.debugCode || '')
+  if (!teacherCode) throw new Error('teacher debug code missing')
+  console.log('[ok] teacher send code')
+
   const teacherRegister = await requestJson('/api/auth/teacher/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       phone: teacherPhone,
       password,
+      code: teacherCode,
       nickname: 'Smoke老师',
       subject: '数学',
       experience: '2年'

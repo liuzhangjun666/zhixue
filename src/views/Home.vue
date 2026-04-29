@@ -110,9 +110,6 @@ onUnmounted(() => {
 
     <main class="hero-section">
       <div class="hero-content">
-        <div class="badge-pill">
-          <span class="badge-dot"></span> 全新 Apple 级沉浸式体验
-        </div>
         <h1 class="hero-title">重新定义<br>同城学习陪伴</h1>
         <p class="hero-subtitle">告别盲目寻找。基于智能算法匹配，在这里找到最懂孩子的良师益友，开启透明、放心的教育之旅。</p>
         
@@ -188,28 +185,6 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-}
-
-.badge-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background: rgba(94, 92, 230, 0.1);
-  color: #5E5CE6;
-  border-radius: 100px;
-  font-size: 14px;
-  font-weight: 600;
-  margin-bottom: 32px;
-  border: 1px solid rgba(94, 92, 230, 0.2);
-}
-
-.badge-dot {
-  width: 8px;
-  height: 8px;
-  background: #5E5CE6;
-  border-radius: 50%;
-  box-shadow: 0 0 8px #5E5CE6;
 }
 
 .hero-title {

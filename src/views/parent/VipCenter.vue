@@ -31,7 +31,7 @@ const openVip = async () => {
   feedback.value = ''
   try {
     await parentApi.subscribeMembership(selectedPlan.value.id, autoRenew.value)
-    currentPlan.value.name = selectedPlan.value.name
+    await loadMembershipData()
     resultText.value = `已开通 ${selectedPlan.value.name}，有效期 ${selectedPlan.value.durationMonth} 个月。`
   } catch (error) {
     feedback.value = (error as Error).message || '开通失败，请稍后重试。'

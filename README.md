@@ -27,6 +27,13 @@
 - `DB_NAME`：数据库名（默认 `zhixue`）
 - `AUTH_TOKEN_SECRET`：Token 签名密钥（开发默认 `zhixue-dev-secret-change-me`）
 - `AUTH_TOKEN_EXPIRES_IN_SECONDS`：Token 有效期秒数（默认 `604800`，即 7 天）
+- `SMS_PROVIDER`：短信发送模式（`mock`/`webhook`，默认 `mock`）
+- `SMS_WEBHOOK_URL`：短信网关中转地址（`SMS_PROVIDER=webhook` 时必填）
+- `SMS_WEBHOOK_TOKEN`：短信网关鉴权 Token（可选）
+- `SMS_SIGN_NAME`：短信签名（默认 `知学空间`）
+- `SMS_VERIFY_TEMPLATE`：验证码模板标识（默认 `VERIFY_CODE`）
+- `SMS_RENEW_TEMPLATE`：续费提醒模板标识（默认 `AUTO_RENEW_REMINDER`）
+- `SMS_TIMEOUT_MS`：短信请求超时毫秒数（默认 `5000`）
 
 > 生产环境要求：必须显式配置 `AUTH_TOKEN_SECRET`，且不能使用开发默认值；否则后端会拒绝启动。
 
@@ -71,10 +78,12 @@ npm run build
 ## 认证流程
 
 1. 家长注册/登录：
+- `POST /api/auth/parent/send-code`
 - `POST /api/auth/parent/register`
 - `POST /api/auth/parent/login`
 
 2. 老师注册/登录：
+- `POST /api/teacher/auth/send-code`
 - `POST /api/auth/teacher/register`
 - `POST /api/auth/teacher/login`
 
@@ -103,12 +112,24 @@ npm run build
 { "code": 403, "message": "Forbidden", "data": null }
 ```
 
+8. 验证码注册规则（最小实现）：
+- 家长注册 `POST /api/auth/parent/register` 需要 `code` 字段；
+- 老师注册 `POST /api/auth/teacher/register` 需要 `code` 字段；
+- 开发环境 `send-code` 响应会返回 `debugCode` 便于本地联调；生产环境不返回。
+
+9. 自动续费短信提醒：
+- 勾选“开通后自动续费”后，后端会在会员到期前 24 小时触发短信提醒；
+- 提醒任务每 10 分钟扫描一次，发送成功后会记录并避免重复发送；
+- 在 `SMS_PROVIDER=mock` 下，短信内容只写入后端日志。
+
 ## 常用 API 简表
 
 | Method | Path | 说明 | 需要 Token |
 |---|---|---|---|
+| POST | `/api/auth/parent/send-code` | 家长发送验证码 | 否 |
 | POST | `/api/auth/parent/register` | 家长注册 | 否 |
 | POST | `/api/auth/parent/login` | 家长登录 | 否 |
+| POST | `/api/teacher/auth/send-code` | 老师发送验证码 | 否 |
 | POST | `/api/auth/teacher/register` | 老师注册/认证提交 | 否 |
 | POST | `/api/auth/teacher/login` | 老师登录 | 否 |
 | GET | `/api/auth/me` | 获取当前用户 | 是 |

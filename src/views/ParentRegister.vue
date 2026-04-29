@@ -1,8 +1,8 @@
 <script setup>
-import { ref } from 'vue'
+import { onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GlassCard from '../components/GlassCard.vue'
-import { parentRegister, setAuthSession } from '../api/auth'
+import { parentRegister, parentSendCode, setAuthSession } from '../api/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -19,7 +19,48 @@ const nickname = ref('')
 const gender = ref('')
 const grade = ref('')
 const loading = ref(false)
+const sendingCode = ref(false)
+const codeCountdown = ref(0)
+const devCodeHint = ref('')
 const errorText = ref('')
+let countdownTimer = null
+
+const clearCountdown = () => {
+  if (countdownTimer) {
+    window.clearInterval(countdownTimer)
+    countdownTimer = null
+  }
+}
+
+const startCountdown = (seconds = 60) => {
+  clearCountdown()
+  codeCountdown.value = seconds
+  countdownTimer = window.setInterval(() => {
+    codeCountdown.value = Math.max(0, codeCountdown.value - 1)
+    if (codeCountdown.value <= 0) {
+      clearCountdown()
+    }
+  }, 1000)
+}
+
+const sendCode = async () => {
+  const normalizedPhone = phone.value.trim()
+  if (!normalizedPhone) {
+    errorText.value = '请先输入手机号'
+    return
+  }
+  sendingCode.value = true
+  errorText.value = ''
+  try {
+    const result = await parentSendCode(normalizedPhone)
+    devCodeHint.value = result.debugCode ? `开发环境验证码：${result.debugCode}` : ''
+    startCountdown(60)
+  } catch (error) {
+    errorText.value = (error && error.message) || '验证码发送失败'
+  } finally {
+    sendingCode.value = false
+  }
+}
 
 const nextStep = () => {
   if (currentStep.value === 1 && !agree.value) {
@@ -28,6 +69,10 @@ const nextStep = () => {
   }
   if (currentStep.value === 1 && password.value !== confirmPassword.value) {
     errorText.value = '两次密码输入不一致'
+    return
+  }
+  if (currentStep.value === 1 && !code.value.trim()) {
+    errorText.value = '请输入验证码'
     return
   }
   errorText.value = ''
@@ -47,7 +92,8 @@ const finishRegister = async () => {
     const data = await parentRegister({
       phone: phone.value.trim(),
       password: password.value,
-      nickname: nickname.value.trim()
+      nickname: nickname.value.trim(),
+      code: code.value.trim()
     })
     if (!data?.token || !data?.user) throw new Error('注册返回数据不完整')
     setAuthSession(data.token, data.user)
@@ -59,6 +105,10 @@ const finishRegister = async () => {
     loading.value = false
   }
 }
+
+onUnmounted(() => {
+  clearCountdown()
+})
 </script>
 
 <template>
@@ -115,9 +165,18 @@ const finishRegister = async () => {
             <div class="input-group">
               <div class="input-wrapper">
                 <input type="text" v-model="code" class="input-field" placeholder="验证码" required>
-                <button type="button" class="btn btn-ghost btn-sm" style="margin-right: 4px;">获取验证码</button>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  style="margin-right: 4px;"
+                  :disabled="sendingCode || codeCountdown > 0"
+                  @click="sendCode"
+                >
+                  {{ codeCountdown > 0 ? `${codeCountdown}s后重发` : (sendingCode ? '发送中...' : '获取验证码') }}
+                </button>
               </div>
             </div>
+            <div class="hint-text" v-if="devCodeHint">{{ devCodeHint }}</div>
             
             <div class="input-group">
               <div class="input-wrapper">
@@ -341,6 +400,13 @@ const finishRegister = async () => {
 .error-text {
   color: #e11d48;
   font-size: 13px;
+}
+
+.hint-text {
+  color: #059669;
+  font-size: 12px;
+  margin-top: -6px;
+  margin-bottom: 10px;
 }
 
 @media (max-width: 992px) {

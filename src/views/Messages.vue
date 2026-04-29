@@ -78,7 +78,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { User as UserIcon, Send as SendIcon, MessageSquare as MessageSquareIcon } from 'lucide-vue-next'
 import { io } from 'socket.io-client'
 import { API_BASE_URL, AUTH_TOKEN_STORAGE_KEY, request, unwrapData } from '../api/http'
-import { getCurrentUser, getStoredUser } from '../api/auth'
+import { clearAuthSession, getCurrentUser, getStoredUser } from '../api/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -162,7 +162,8 @@ onMounted(() => {
       currentUserId.value = Number(user.id || 0)
     })
     .catch(() => {
-      router.replace('/login')
+      clearAuthSession()
+      router.replace({ path: '/login', query: { redirect: route.fullPath } })
     })
     .finally(() => {
       loadConversations()
@@ -192,8 +193,14 @@ onMounted(() => {
     loadConversations()
   })
 
-  socket.on('connect_error', () => {
-    router.replace('/login')
+  socket.on('connect_error', (error) => {
+    const message = String(error?.message || '')
+    if (message.toLowerCase().includes('unauthorized')) {
+      clearAuthSession()
+      router.replace({ path: '/login', query: { redirect: route.fullPath } })
+      return
+    }
+    console.warn('Socket connect error:', message || error)
   })
 })
 

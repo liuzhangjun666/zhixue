@@ -15,6 +15,7 @@ export interface ParentProfileDTO {
   city: string
   bio: string
   avatar?: string
+  createdAt?: string
   preferredGrade: string
   preferredSubjects: string[]
   children: ChildProfileDTO[]
@@ -129,6 +130,7 @@ const normalizeProfile = (raw: Record<string, any>): ParentProfileDTO => {
     city: raw.city || raw.city_name || '',
     bio: raw.bio || raw.intro || '',
     avatar: raw.avatar || '',
+    createdAt: raw.createdAt || raw.created_at || '',
     preferredGrade: raw.preferredGrade || raw.preferred_grade || '',
     preferredSubjects: raw.preferredSubjects || raw.preferred_subjects || [],
     children: Array.isArray(childrenSource)

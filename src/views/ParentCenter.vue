@@ -1,21 +1,48 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { Edit3, ClipboardList, Star, Crown, Settings, Bell } from 'lucide-vue-next'
 import { parentApi, type ParentProfileDTO } from '../api/parent'
 
 const router = useRouter()
-const route = useRoute()
-const showVipModal = ref<boolean>(false)
+const PARENT_AVATAR_CACHE_KEY = 'zhixue_parent_avatar_cache'
 
 const userProfile = ref<ParentProfileDTO | null>(null)
+const cachedAvatar = ref('')
+const membershipStatus = ref({
+  planName: '普通用户',
+  expireAt: '-',
+  remainingUnlock: 0
+})
 const requestCount = ref<number>(0)
+const reviewCount = ref<number>(0)
 const notificationCount = ref<number>(0)
 const fileInput = ref<HTMLInputElement | null>(null)
 
+const loadCachedAvatar = () => {
+  if (typeof window === 'undefined') return ''
+  return window.localStorage.getItem(PARENT_AVATAR_CACHE_KEY) || ''
+}
+
+const persistCachedAvatar = (value: string) => {
+  if (typeof window === 'undefined') return
+  if (!value) {
+    window.localStorage.removeItem(PARENT_AVATAR_CACHE_KEY)
+    return
+  }
+  window.localStorage.setItem(PARENT_AVATAR_CACHE_KEY, value)
+}
+
+const avatarSrc = computed(() => userProfile.value?.avatar || cachedAvatar.value || '')
+
 onMounted(async () => {
+  cachedAvatar.value = loadCachedAvatar()
   try {
     userProfile.value = await parentApi.getProfile()
+    if (userProfile.value?.avatar) {
+      cachedAvatar.value = userProfile.value.avatar
+      persistCachedAvatar(userProfile.value.avatar)
+    }
   } catch(e) {
     console.error('Failed to load profile', e)
   }
@@ -30,6 +57,17 @@ onMounted(async () => {
     notificationCount.value = Array.isArray(notifications.matchUpdates) ? notifications.matchUpdates.length : 0
   } catch (e) {
     console.error('Failed to load notifications', e)
+  }
+  try {
+    const [membership, reviews] = await Promise.all([parentApi.getMembershipStatus(), parentApi.getReviews()])
+    membershipStatus.value = {
+      planName: membership.planName || '普通用户',
+      expireAt: membership.expireAt || '-',
+      remainingUnlock: Number(membership.remainingUnlock || 0)
+    }
+    reviewCount.value = Array.isArray(reviews) ? reviews.length : 0
+  } catch (e) {
+    console.error('Failed to load membership/reviews', e)
   }
 })
 
@@ -48,6 +86,8 @@ const onFileChange = async (event: Event) => {
     if (userProfile.value) {
       userProfile.value.avatar = base64
     }
+    cachedAvatar.value = base64
+    persistCachedAvatar(base64)
     try {
       await parentApi.uploadAvatar(base64)
     } catch(err) {
@@ -71,7 +111,7 @@ const menuItems = computed<MenuItem[]>(() => [
   { title: '编辑资料', icon: Edit3, path: '/parent/edit' },
   { title: '通知中心', icon: Bell, path: '/parent/notifications', badge: notificationCount.value > 0 ? notificationCount.value : undefined },
   { title: '我的请求', icon: ClipboardList, path: '/parent/requests', badge: requestCount.value > 0 ? requestCount.value : undefined },
-  { title: '我的评价', icon: Star, path: '/parent/reviews', suffix: '共 12 条' },
+  { title: '我的评价', icon: Star, path: '/parent/reviews', suffix: `共 ${reviewCount.value} 条` },
   {
     title: '会员中心',
     icon: Crown,
@@ -95,16 +135,17 @@ const handleNavigate = (path: string) => {
     <div class="apple-card mb-4 w-full">
       <div class="user-profile">
         <div class="avatar-large" @click="triggerAvatarUpload" style="cursor: pointer;">
-          <img :src="userProfile?.avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix'" alt="avatar" />
+          <img v-if="avatarSrc" :src="avatarSrc" alt="avatar" />
+          <div v-else class="avatar-placeholder">头像</div>
           <div class="avatar-hover-overlay">更换头像</div>
           <input type="file" ref="fileInput" accept="image/png, image/jpeg" style="display: none" @change="onFileChange" />
         </div>
         <div class="user-info">
           <h2 class="user-name">{{ userProfile?.parentName || '加载中...' }} <span class="badge-verified">已认证</span></h2>
           <div class="user-meta mt-1">
-            <span>诚信评分：4.9</span>
+            <span>诚信评分：待完善</span>
             <span class="mx-2">|</span>
-            <span>入驻时间：2025-01-10</span>
+            <span>入驻时间：{{ userProfile?.createdAt || '-' }}</span>
           </div>
         </div>
         <button class="btn-ghost-edit" @click="handleNavigate('/parent/edit')">编辑资料</button>
@@ -117,17 +158,17 @@ const handleNavigate = (path: string) => {
       <div class="dark-gold-vip-card h-full">
         <div class="vip-header">
           <div>
-            <div class="vip-title"><Crown class="gold-icon" /> 粉钻会员</div>
-            <div class="vip-date">到期时间：2026-05-15</div>
+            <div class="vip-title"><Crown class="gold-icon" /> {{ membershipStatus.planName }}</div>
+            <div class="vip-date">到期时间：{{ membershipStatus.expireAt || '-' }}</div>
           </div>
         </div>
         
         <div class="vip-footer">
           <div class="unlock-section">
             <div class="unlock-title">今日剩余解锁</div>
-            <div class="unlock-count">5 <span class="unlock-unit">次</span></div>
+            <div class="unlock-count">{{ membershipStatus.remainingUnlock }} <span class="unlock-unit">次</span></div>
           </div>
-          <button class="btn-gold-glass" @click="showVipModal = true">立即寻找老师</button>
+          <button class="btn-gold-glass" @click="handleNavigate('/discover')">立即寻找老师</button>
         </div>
       </div>
 
@@ -231,6 +272,17 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.avatar-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #9ca3af;
+  background: #f5f5f7;
 }
 
 .user-name {

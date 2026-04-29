@@ -3,7 +3,7 @@ import mysql from 'mysql2/promise'
 const DB_HOST = process.env.DB_HOST || 'localhost'
 const DB_PORT = Number(process.env.DB_PORT || 3306)
 const DB_USER = process.env.DB_USER || 'root'
-const DB_PASSWORD = process.env.DB_PASSWORD || 'zx456852'
+const DB_PASSWORD = process.env.DB_PASSWORD || '123456'
 const DB_NAME = process.env.DB_NAME || 'zhixue'
 
 const pool = mysql.createPool({
@@ -82,6 +82,44 @@ const ensureInviteRecordsTable = async () => {
   `)
 }
 
+const ensureTeacherVerificationsTable = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS teacher_verifications (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      cert_type ENUM('teacher_license','work_proof','id_card') NOT NULL,
+      cert_url LONGTEXT NOT NULL,
+      status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+      review_remark VARCHAR(255) NOT NULL DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_teacher_verifications_user(user_id, status, created_at)
+    ) ENGINE=InnoDB;
+  `)
+}
+
+const ensureReviewsTable = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS reviews (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      parent_id INT NOT NULL,
+      match_id INT DEFAULT NULL,
+      reviewer_id INT DEFAULT NULL,
+      reviewee_id INT DEFAULT NULL,
+      teacher_name VARCHAR(50) NOT NULL DEFAULT '',
+      subject VARCHAR(20) DEFAULT '',
+      rating TINYINT UNSIGNED DEFAULT 5,
+      integrity_rating TINYINT UNSIGNED DEFAULT 5,
+      responsibility_rating TINYINT UNSIGNED DEFAULT 5,
+      content TEXT,
+      reply TEXT,
+      created_at DATE DEFAULT (CURRENT_DATE),
+      INDEX idx_reviews_parent_created (parent_id, created_at),
+      INDEX idx_reviews_teacher_created (teacher_name, created_at)
+    ) ENGINE=InnoDB;
+  `)
+}
+
 const tableExists = async (tableName) => {
   const [rows] = await pool.query(
     `SELECT 1
@@ -123,6 +161,11 @@ async function run() {
       await ensureColumn('teacher_profiles', 'school', "school VARCHAR(100) NOT NULL DEFAULT ''")
     }
 
+    const membershipsExists = await tableExists('memberships')
+    if (membershipsExists) {
+      await ensureColumn('memberships', 'renew_reminder_sent_at', 'renew_reminder_sent_at DATETIME NULL')
+    }
+
     const matchesExists = await tableExists('matches')
     if (matchesExists) {
       await ensureColumn(
@@ -144,14 +187,12 @@ async function run() {
       await ensureColumn('matches', 'last_feedback_at', 'last_feedback_at DATETIME NULL')
     }
 
-    const reviewsExists = await tableExists('reviews')
-    if (reviewsExists) {
-      await ensureColumn('reviews', 'match_id', 'match_id INT NULL')
-      await ensureColumn('reviews', 'reviewer_id', 'reviewer_id INT NULL')
-      await ensureColumn('reviews', 'reviewee_id', 'reviewee_id INT NULL')
-      await ensureColumn('reviews', 'integrity_rating', 'integrity_rating TINYINT UNSIGNED DEFAULT 5')
-      await ensureColumn('reviews', 'responsibility_rating', 'responsibility_rating TINYINT UNSIGNED DEFAULT 5')
-    }
+    await ensureReviewsTable()
+    await ensureColumn('reviews', 'match_id', 'match_id INT NULL')
+    await ensureColumn('reviews', 'reviewer_id', 'reviewer_id INT NULL')
+    await ensureColumn('reviews', 'reviewee_id', 'reviewee_id INT NULL')
+    await ensureColumn('reviews', 'integrity_rating', 'integrity_rating TINYINT UNSIGNED DEFAULT 5')
+    await ensureColumn('reviews', 'responsibility_rating', 'responsibility_rating TINYINT UNSIGNED DEFAULT 5')
 
     await ensureComplaintsTable()
     await ensureColumn('complaints', 'appeal_content', 'appeal_content TEXT')
@@ -162,6 +203,9 @@ async function run() {
       "appeal_status ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none'"
     )
     await ensureInviteRecordsTable()
+    await ensureTeacherVerificationsTable()
+    await pool.query('ALTER TABLE teacher_verifications MODIFY COLUMN cert_url LONGTEXT NOT NULL')
+    console.log('[ok] ensured teacher_verifications.cert_url LONGTEXT')
 
     console.log('[done] compatibility migration finished')
   } catch (error) {

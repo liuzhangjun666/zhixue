@@ -10,12 +10,8 @@ export interface AuthUser {
 interface AuthResponse {
   user: AuthUser
   token: string
-}
-
-interface TeacherRegisterResponse {
-  reviewStatus: 'pending' | 'approved' | 'rejected'
-  userId: number
-  submittedAt: string
+  tokenExpiresIn?: number
+  tokenExpiresAt?: string
 }
 
 export const setAuthSession = (token: string, user: AuthUser) => {
@@ -48,7 +44,12 @@ export const parentLogin = async (payload: { phone: string; password: string }) 
   return unwrapData(res, {} as AuthResponse)
 }
 
-export const parentRegister = async (payload: { phone: string; password: string; nickname: string }) => {
+export const parentSendCode = async (phone: string) => {
+  const res = await request('/api/auth/parent/send-code', { method: 'POST', body: { phone } })
+  return unwrapData(res, { sent: false, ttlSeconds: 300, debugCode: '' as string | undefined })
+}
+
+export const parentRegister = async (payload: { phone: string; password: string; nickname: string; code: string }) => {
   const res = await request('/api/auth/parent/register', { method: 'POST', body: payload })
   return unwrapData(res, {} as AuthResponse)
 }
@@ -79,7 +80,7 @@ export const teacherRegister = async (payload: {
   certUrl?: string
 }) => {
   const res = await request('/api/teacher/auth/register', { method: 'POST', body: payload })
-  return unwrapData(res, {} as TeacherRegisterResponse)
+  return unwrapData(res, {} as AuthResponse)
 }
 
 export const getCurrentUser = async () => {
