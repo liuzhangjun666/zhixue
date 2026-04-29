@@ -49,9 +49,14 @@ CREATE TABLE IF NOT EXISTS requests (
 CREATE TABLE IF NOT EXISTS reviews (
   id INT AUTO_INCREMENT PRIMARY KEY,
   parent_id INT NOT NULL,
+  match_id INT DEFAULT NULL,
+  reviewer_id INT DEFAULT NULL,
+  reviewee_id INT DEFAULT NULL,
   teacher_name VARCHAR(50) NOT NULL DEFAULT '',
   subject VARCHAR(20) DEFAULT '',
   rating TINYINT UNSIGNED DEFAULT 5,
+  integrity_rating TINYINT UNSIGNED DEFAULT 5,
+  responsibility_rating TINYINT UNSIGNED DEFAULT 5,
   content TEXT,
   reply TEXT,
   created_at DATE DEFAULT (CURRENT_DATE),
@@ -94,11 +99,15 @@ CREATE TABLE IF NOT EXISTS teacher_profiles (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL UNIQUE,
   real_name VARCHAR(50) NOT NULL DEFAULT '',
+  gender ENUM('male','female') NOT NULL DEFAULT 'male',
   city VARCHAR(50) NOT NULL DEFAULT '',
   district VARCHAR(50) NOT NULL DEFAULT '',
   subjects JSON,
   grades JSON,
   experience_years INT NOT NULL DEFAULT 0,
+  teaching_methods JSON,
+  fee_range ENUM('under_100','100_150','150_200','over_200') NOT NULL DEFAULT '100_150',
+  school VARCHAR(100) NOT NULL DEFAULT '',
   teaching_style VARCHAR(100) NOT NULL DEFAULT '',
   student_type VARCHAR(100) NOT NULL DEFAULT '',
   areas JSON,
@@ -156,6 +165,15 @@ CREATE TABLE IF NOT EXISTS matches (
   request_id INT NOT NULL,
   match_score DECIMAL(5,2) NOT NULL DEFAULT 0,
   status ENUM('new','viewed','unlocked','accepted','rejected','expired') NOT NULL DEFAULT 'new',
+  parent_accept_status ENUM('pending','accepted','rejected') NOT NULL DEFAULT 'pending',
+  teacher_accept_status ENUM('pending','accepted','rejected') NOT NULL DEFAULT 'pending',
+  unlock_granted TINYINT(1) NOT NULL DEFAULT 0,
+  feedback_submitted TINYINT(1) NOT NULL DEFAULT 0,
+  rematch_count TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  feedback_reason VARCHAR(255) NOT NULL DEFAULT '',
+  degrade_level TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  match_tips JSON,
+  last_feedback_at DATETIME DEFAULT NULL,
   matched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   unlocked_at DATETIME DEFAULT NULL,
   week_number INT NOT NULL,
@@ -179,6 +197,45 @@ CREATE TABLE IF NOT EXISTS contact_unlock_records (
   CONSTRAINT fk_unlock_teacher FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE CASCADE,
   CONSTRAINT fk_unlock_parent FOREIGN KEY (parent_id) REFERENCES users(id) ON DELETE CASCADE,
   CONSTRAINT fk_unlock_request FOREIGN KEY (request_id) REFERENCES requests(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 投诉与申诉
+CREATE TABLE IF NOT EXISTS complaints (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  complainant_id INT NOT NULL,
+  respondent_id INT NOT NULL,
+  match_id INT DEFAULT NULL,
+  type ENUM('fake_info','harassment','service_issue','other') NOT NULL DEFAULT 'other',
+  content TEXT NOT NULL,
+  evidence JSON,
+  status ENUM('pending','processing','resolved','rejected') NOT NULL DEFAULT 'pending',
+  result TEXT,
+  appeal_content TEXT,
+  appealed_at DATETIME DEFAULT NULL,
+  appeal_status ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none',
+  handled_by INT DEFAULT NULL,
+  handled_at DATETIME DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_complaints_respondent (respondent_id, status, created_at),
+  FOREIGN KEY (complainant_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (respondent_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 邀请记录
+CREATE TABLE IF NOT EXISTS invite_records (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  inviter_id INT NOT NULL,
+  invitee_id INT DEFAULT NULL,
+  role ENUM('teacher','parent') NOT NULL,
+  invite_code VARCHAR(32) NOT NULL,
+  status ENUM('pending','verified') NOT NULL DEFAULT 'pending',
+  reward_granted TINYINT(1) NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_inviter_role_status(inviter_id, role, status),
+  UNIQUE KEY uk_inviter_code(inviter_id, invite_code),
+  FOREIGN KEY (inviter_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- 会话表

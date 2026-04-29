@@ -76,6 +76,7 @@ export interface ParentSettingsDTO {
 const ENDPOINTS = {
   profile: '/api/parent/profile',
   requests: '/api/parent/requests',
+  matches: '/api/parent/matches',
   reviews: '/api/parent/reviews',
   membershipStatus: '/api/membership/status',
   membershipPlans: '/api/membership/plans?role=parent',
@@ -208,6 +209,32 @@ export const parentApi = {
 
   async updateRequestStatus(id: number, status: RequestStatus) {
     await request(`${ENDPOINTS.requests}/${id}/status`, { method: 'PATCH', body: { status } })
+  },
+
+  async getMatches(status?: string) {
+    const query = status ? `?status=${encodeURIComponent(status)}` : ''
+    const payload = await request(`${ENDPOINTS.matches}${query}`)
+    return unwrapData(payload, [] as Record<string, any>[])
+  },
+
+  async acceptMatch(id: number) {
+    await request(`${ENDPOINTS.matches}/${id}/accept`, { method: 'POST' })
+  },
+
+  async rejectMatch(id: number) {
+    await request(`${ENDPOINTS.matches}/${id}/reject`, { method: 'POST' })
+  },
+
+  async feedbackMatch(id: number, reason: string) {
+    const payload = await request(`${ENDPOINTS.matches}/${id}/feedback`, { method: 'POST', body: { reason } })
+    return unwrapData(payload, { rematched: false, generated: 0 })
+  },
+
+  async submitReview(matchId: number, integrityRating: number, responsibilityRating: number, comment: string) {
+    await request(`/api/matches/${matchId}/review`, {
+      method: 'POST',
+      body: { integrityRating, responsibilityRating, comment }
+    })
   },
 
   async getReviews() {

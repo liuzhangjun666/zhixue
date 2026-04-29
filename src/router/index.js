@@ -95,6 +95,11 @@ const routes = [
         component: () => import('../views/teacher/Reviews.vue')
       },
       {
+        path: 'notifications',
+        name: 'TeacherNotifications',
+        component: () => import('../views/teacher/Notifications.vue')
+      },
+      {
         path: 'analytics',
         name: 'TeacherAnalytics',
         component: () => import('../views/teacher/Analytics.vue')

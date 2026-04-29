@@ -61,7 +61,7 @@ const parseArrayField = (value) => {
     try {
       const parsed = JSON.parse(value)
       if (Array.isArray(parsed)) return parsed.map((item) => String(item)).filter(Boolean)
-    } catch {}
+    } catch { }
     return value
       .split(/[,,，、\s]+/)
       .map((item) => item.trim())
@@ -156,12 +156,16 @@ const ensureTeacherProfile = async (user) => {
        (user_id, real_name, city, district, subjects, grades, intro, experience_years, teaching_mode, available_time_text, is_active)
      VALUES (?, ?, ?, '', ?, ?, ?, 0, 'both', '工作日晚间、周末可约', TRUE)`,
     [
-      user.id,
-      user.nickname || '',
-      user.city || '',
-      JSON.stringify(parseArrayField(user.preferred_subjects)),
-      JSON.stringify(parseArrayField(user.preferred_grade)),
-      user.bio || ''
+      userId,
+      nickname,
+      gender,
+      city,
+      JSON.stringify(preferredSubjects),
+      parseExperienceYears(experience),
+      JSON.stringify(teachingMethods),
+      feeRange,
+      school,
+      experience
     ]
   )
   const [created] = await pool.query('SELECT * FROM teacher_profiles WHERE user_id = ? LIMIT 1', [user.id])
@@ -384,6 +388,65 @@ app.post('/api/auth/teacher/login', async (req, res) => {
 })
 
 app.get('/api/auth/me', authRequired(), async (req, res) => {
+  try {
+    const user = await currentUserOrFail(req, res)
+    if (!user) return
+    ok(res, {
+      ...authUserDTO(user),
+      city: user.city || '',
+      bio: user.bio || '',
+      avatar: user.avatar || ''
+    })
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.post('/api/auth/logout', authRequired(), (_req, res) => {
+  ok(res, { success: true }, '退出成功')
+})
+
+app.post('/api/teacher/auth/send-code', async (req, res) => {
+  const phone = normalizePhone(req.body?.phone)
+  if (!phone) return fail(res, 400, 'phone is required')
+  if (!isValidMainlandPhone(phone)) return fail(res, 400, '请输入正确的手机号')
+
+  const code = issueTeacherSmsCode(phone)
+  const data = {
+    sent: true,
+    expireInSeconds: Math.floor(TEACHER_SMS_CODE_EXPIRES_MS / 1000)
+  }
+  if (process.env.NODE_ENV !== 'production') {
+    data.debugCode = code
+  }
+  ok(res, data, '验证码已发送')
+})
+
+app.post('/api/teacher/auth/register', async (req, res) => {
+  try {
+    const result = await registerTeacherAccount(req.body || {})
+    if (!result.ok) return fail(res, result.status, result.message)
+    ok(res, result.data, result.message)
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.post('/api/teacher/auth/login', async (req, res) => {
+  try {
+    const result = await loginTeacherAccount(req.body || {})
+    if (!result.ok) return fail(res, result.status, result.message)
+    ok(res, result.data, result.message)
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.post('/api/teacher/auth/logout', authRequired('teacher'), (_req, res) => {
+  ok(res, { success: true }, '退出成功')
+})
+
+app.get('/api/teacher/auth/me', authRequired('teacher'), async (req, res) => {
   try {
     const user = await currentUserOrFail(req, res)
     if (!user) return
@@ -621,7 +684,7 @@ app.get('/api/parent/reviews', authRequired('parent'), async (req, res) => {
   }
 })
 
-app.post('/api/parent/reviews/:id/reply', authRequired('parent'), async (req, res) => {
+app.post('/api/parent/matches/:id/accept', authRequired('parent'), async (req, res) => {
   const id = Number(req.params.id)
   const reply = String(req.body?.reply || '').trim()
   if (!reply) return fail(res, 400, 'reply cannot be empty')
@@ -936,497 +999,518 @@ app.patch('/api/teacher/requests/:id/status', authRequired('teacher'), async (re
 })
 
 app.get('/api/teacher/reviews', authRequired('teacher'), async (req, res) => {
-  try {
-    const teacher = await currentUserOrFail(req, res)
-    if (!teacher) return
-    const [rows] = await pool.query(
-      `SELECT r.*, u.nickname AS parent_name
+  app.get('/api/teacher/reviews', authRequired('teacher'), async (req, res) => {
+    try {
+      const teacher = await currentUserOrFail(req, res)
+      if (!teacher) return
+      const [rows] = await pool.query(
+        `SELECT r.*, u.nickname AS parent_name
          FROM reviews r
          JOIN users u ON r.parent_id = u.id
         WHERE r.teacher_name = ?
         ORDER BY r.created_at DESC`,
-      [teacher.nickname]
-    )
-    ok(
-      res,
-      rows.map((item) => ({
-        id: item.id,
-        parentName: item.parent_name,
-        subject: item.subject,
-        rating: Number(item.rating || 0),
-        content: item.content || '',
-        date: dateOnly(item.created_at)
-      }))
-    )
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
-
-app.get('/api/teacher/analytics', authRequired('teacher'), async (req, res) => {
-  try {
-    const teacher = await currentUserOrFail(req, res)
-    if (!teacher) return
-    const [requestRows] = await pool.query(
-      `SELECT status, COUNT(*) AS count FROM requests WHERE teacher_name = ? GROUP BY status`,
-      [teacher.nickname]
-    )
-    const [reviewRows] = await pool.query(
-      `SELECT COUNT(*) AS total_reviews, AVG(rating) AS average_rating FROM reviews WHERE teacher_name = ?`,
-      [teacher.nickname]
-    )
-    const counters = requestRows.reduce((acc, row) => ({ ...acc, [row.status]: Number(row.count || 0) }), {})
-    const totalHandled = Object.values(counters).reduce((sum, count) => sum + Number(count || 0), 0)
-    ok(res, {
-      weeklyViews: 120 + totalHandled * 18,
-      totalViews: (120 + totalHandled * 18) * 8,
-      pendingRequests: Number(counters.pending || 0) + Number(counters.matching || 0),
-      scheduledRequests: Number(counters.scheduled || 0),
-      completedRequests: Number(counters.completed || 0),
-      averageRating: Number(reviewRows[0]?.average_rating || 0),
-      totalReviews: Number(reviewRows[0]?.total_reviews || 0),
-      responseRate: totalHandled === 0 ? 0 : (Number(counters.completed || 0) + Number(counters.scheduled || 0)) / totalHandled
-    })
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
-
-app.get('/api/teacher/matches', authRequired('teacher'), async (_req, res) => ok(res, []))
-app.post('/api/teacher/matches/:id/unlock', authRequired('teacher'), async (_req, res) => fail(res, 404, 'Match not found'))
-app.post('/api/teacher/matches/:id/accept', authRequired('teacher'), async (_req, res) => fail(res, 404, 'Match not found'))
-app.post('/api/teacher/matches/:id/reject', authRequired('teacher'), async (_req, res) => fail(res, 404, 'Match not found'))
-app.get('/api/teacher/unlock-records', authRequired('teacher'), async (_req, res) => ok(res, []))
-app.get('/api/teacher/dashboard/summary', authRequired('teacher'), async (req, res) => {
-  try {
-    const [membershipRows] = await pool.query('SELECT remaining_unlock FROM memberships WHERE user_id = ?', [req.user.id])
-    ok(res, {
-      newMatchCount: 0,
-      unlockedMatchCount: 0,
-      processingRequestCount: 0,
-      remainingUnlock: Number(membershipRows[0]?.remaining_unlock || 0)
-    })
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
-
-app.get('/api/membership/status', authRequired(), async (req, res) => {
-  const defaultName = req.user.role === 'teacher' ? '普通老师' : '普通用户'
-  try {
-    const [rows] = await pool.query('SELECT * FROM memberships WHERE user_id = ?', [req.user.id])
-    if (!rows.length) return ok(res, { planName: defaultName, expireAt: null, remainingUnlock: 0, weeklyPriorityQuota: 0 })
-    const item = rows[0]
-    ok(res, {
-      planName: item.plan_name,
-      expireAt: item.expire_at ? dateOnly(item.expire_at) : null,
-      remainingUnlock: Number(item.remaining_unlock || 0),
-      weeklyPriorityQuota: Number(item.weekly_priority_quota || 0),
-      autoRenew: !!item.auto_renew
-    })
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
-
-app.get('/api/membership/plans', async (_req, res) => {
-  try {
-    const [rows] = await pool.query('SELECT * FROM membership_plans')
-    ok(
-      res,
-      rows.map((item) => ({
-        id: item.id,
-        name: item.name,
-        price: Number(item.price || 0),
-        durationMonth: Number(item.duration_month || 1),
-        features: parseArrayField(item.features),
-        recommended: !!item.recommended
-      }))
-    )
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
-
-app.post('/api/membership/subscribe', authRequired(), async (req, res) => {
-  const planId = String(req.body?.plan_id || '')
-  const autoRenew = Boolean(req.body?.auto_renew)
-  try {
-    const [plans] = await pool.query('SELECT * FROM membership_plans WHERE id = ? LIMIT 1', [planId])
-    if (!plans.length) return fail(res, 404, 'Plan not found')
-    const plan = plans[0]
-    const expire = new Date()
-    expire.setMonth(expire.getMonth() + Number(plan.duration_month || 1))
-    const unlock = Number(plan.duration_month || 1) * 5
-    const quota = plan.id === 'year' ? 8 : plan.id === 'quarter' ? 5 : 3
-    await pool.query(
-      `INSERT INTO memberships (user_id, plan_name, expire_at, remaining_unlock, weekly_priority_quota, auto_renew)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         plan_name=VALUES(plan_name),
-         expire_at=VALUES(expire_at),
-         remaining_unlock=VALUES(remaining_unlock),
-         weekly_priority_quota=VALUES(weekly_priority_quota),
-         auto_renew=VALUES(auto_renew)`,
-      [req.user.id, plan.name, expire, unlock, quota, autoRenew]
-    )
-    ok(res, {
-      planName: plan.name,
-      expireAt: dateOnly(expire),
-      remainingUnlock: unlock,
-      weeklyPriorityQuota: quota,
-      autoRenew
-    })
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
-
-app.get('/api/teacher/membership/status', authRequired('teacher'), async (req, res) => {
-  try {
-    const [rows] = await pool.query('SELECT * FROM memberships WHERE user_id = ?', [req.user.id])
-    if (!rows.length) return ok(res, { planName: '普通老师', expireAt: null, remainingUnlock: 3, weeklyPriorityQuota: 1 })
-    const item = rows[0]
-    ok(res, {
-      planName: item.plan_name,
-      expireAt: item.expire_at ? dateOnly(item.expire_at) : null,
-      remainingUnlock: Number(item.remaining_unlock || 0),
-      weeklyPriorityQuota: Number(item.weekly_priority_quota || 0),
-      autoRenew: !!item.auto_renew
-    })
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
-app.get('/api/teacher/membership/plans', authRequired('teacher'), async (_req, res) =>
-  ok(res, [
-    { id: 'bronze', name: '铜牌老师', price: 19.9, durationMonth: 1, features: ['每天 5 次解锁次数', '中部曝光位', '基础数据面板'], recommended: false },
-    { id: 'silver', name: '银牌老师', price: 29.9, durationMonth: 1, features: ['每天 10 次解锁次数', '上部曝光位', '详细报表 + 实时通知'], recommended: true },
-    { id: 'gold', name: '金牌老师', price: 49.9, durationMonth: 1, features: ['无限解锁次数', '顶部置顶曝光', '优先推荐 + 专属客服'], recommended: false }
-  ])
-)
-app.post('/api/teacher/membership/subscribe', authRequired('teacher'), async (req, res) => {
-  const planMap = {
-    bronze: { name: '铜牌老师', unlock: 5, quota: 2 },
-    silver: { name: '银牌老师', unlock: 10, quota: 5 },
-    gold: { name: '金牌老师', unlock: 999, quota: 10 }
-  }
-  const selected = planMap[String(req.body?.plan_id || '')]
-  if (!selected) return fail(res, 404, 'Plan not found')
-  try {
-    const expire = new Date()
-    expire.setMonth(expire.getMonth() + 1)
-    await pool.query(
-      `INSERT INTO memberships (user_id, plan_name, expire_at, remaining_unlock, weekly_priority_quota, auto_renew)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         plan_name=VALUES(plan_name),
-         expire_at=VALUES(expire_at),
-         remaining_unlock=VALUES(remaining_unlock),
-         weekly_priority_quota=VALUES(weekly_priority_quota),
-         auto_renew=VALUES(auto_renew)`,
-      [req.user.id, selected.name, expire, selected.unlock, selected.quota, Boolean(req.body?.auto_renew)]
-    )
-    ok(res, {
-      planName: selected.name,
-      expireAt: dateOnly(expire),
-      remainingUnlock: selected.unlock,
-      weeklyPriorityQuota: selected.quota,
-      autoRenew: Boolean(req.body?.auto_renew)
-    })
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
-
-app.get('/api/teacher/settings', authRequired('teacher'), async (req, res) => {
-  try {
-    const [rows] = await pool.query('SELECT * FROM user_settings WHERE user_id = ?', [req.user.id])
-    ok(res, { notifications: parseObjectField(rows[0]?.notifications), privacy: parseObjectField(rows[0]?.privacy) })
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
-
-app.put('/api/teacher/settings/password', authRequired('teacher'), async (req, res) => {
-  const currentPassword = String(req.body?.current_password || '')
-  const nextPassword = String(req.body?.new_password || '')
-  if (nextPassword.length < 6) return fail(res, 400, 'New password must be at least 6 chars')
-  try {
-    const user = await currentUserOrFail(req, res)
-    if (!user) return
-    if (!(await bcrypt.compare(currentPassword, user.password_hash || ''))) return fail(res, 400, 'Current password is incorrect')
-    await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [await bcrypt.hash(nextPassword, 10), req.user.id])
-    ok(res, { updated: true })
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
-
-app.put('/api/teacher/settings/notifications', authRequired('teacher'), async (req, res) => {
-  try {
-    const [rows] = await pool.query('SELECT notifications FROM user_settings WHERE user_id = ?', [req.user.id])
-    const nextOpts = { ...parseObjectField(rows[0]?.notifications), ...(req.body || {}) }
-    await pool.query(
-      'INSERT INTO user_settings (user_id, notifications) VALUES (?, ?) ON DUPLICATE KEY UPDATE notifications=VALUES(notifications)',
-      [req.user.id, JSON.stringify(nextOpts)]
-    )
-    ok(res, nextOpts)
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
-
-app.put('/api/teacher/settings/privacy', authRequired('teacher'), async (req, res) => {
-  try {
-    const [rows] = await pool.query('SELECT privacy FROM user_settings WHERE user_id = ?', [req.user.id])
-    const nextOpts = { ...parseObjectField(rows[0]?.privacy), ...(req.body || {}) }
-    await pool.query(
-      'INSERT INTO user_settings (user_id, privacy) VALUES (?, ?) ON DUPLICATE KEY UPDATE privacy=VALUES(privacy)',
-      [req.user.id, JSON.stringify(nextOpts)]
-    )
-    ok(res, nextOpts)
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
-
-app.get('/api/discover/teachers', async (req, res) => {
-  try {
-    const query = req.query || {}
-    const keyword = String(query.keyword || '').trim().toLowerCase()
-    const subject = String(query.subject || '').trim()
-    const grade = String(query.grade || '').trim()
-    const city = String(query.city || '').trim()
-    const mode = String(query.mode || '').trim()
-    const minPrice = query.min_price === undefined || query.min_price === '' ? null : Number(query.min_price)
-    const maxPrice = query.max_price === undefined || query.max_price === '' ? null : Number(query.max_price)
-    const minRating = query.min_rating === undefined || query.min_rating === '' ? null : Number(query.min_rating)
-    const sort = String(query.sort || 'recommended')
-    const page = Math.max(1, Number(query.page || 1))
-    const pageSize = Math.min(50, Math.max(1, Number(query.page_size || 12)))
-
-    let list = await loadDiscoverTeachers()
-    list = list.filter((item) => {
-      const haystack = [item.name, item.nickname, item.city, item.district, item.intro, ...item.subjects, ...item.grades]
-        .join(' ')
-        .toLowerCase()
-      if (keyword && !haystack.includes(keyword)) return false
-      if (subject && !item.subjects.includes(subject)) return false
-      if (grade && !item.grades.includes(grade)) return false
-      if (city && item.city !== city) return false
-      if (mode && mode !== 'all' && item.teachingMode !== mode && item.teachingMode !== 'both') return false
-      if (minRating !== null && item.ratingAvg < minRating) return false
-      if (minPrice !== null && item.hourlyPriceMax !== null && item.hourlyPriceMax < minPrice) return false
-      if (maxPrice !== null && item.hourlyPriceMin !== null && item.hourlyPriceMin > maxPrice) return false
-      return true
-    })
-
-    const sorters = {
-      latest: (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime(),
-      rating_desc: (a, b) => b.ratingAvg - a.ratingAvg || b.ratingCount - a.ratingCount,
-      price_asc: (a, b) => (a.hourlyPriceMin ?? 999999) - (b.hourlyPriceMin ?? 999999),
-      price_desc: (a, b) => (b.hourlyPriceMax ?? -1) - (a.hourlyPriceMax ?? -1),
-      recommended: (a, b) => b.score - a.score
+        [teacher.nickname]
+      )
+      ok(
+        res,
+        rows.map((item) => ({
+          id: item.id,
+          parentName: item.parent_name,
+          subject: item.subject,
+          rating: Number(item.rating || 0),
+          content: item.content || '',
+          date: dateOnly(item.created_at)
+        }))
+      )
+    } catch (error) {
+      fail(res, 500, error.message)
     }
-    list.sort(sorters[sort] || sorters.recommended)
-    const total = list.length
-    const start = (page - 1) * pageSize
-    ok(res, { list: list.slice(start, start + pageSize), total, page, pageSize })
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
+  })
 
-app.get('/api/discover/teachers/:teacherId', async (req, res) => {
-  const teacherId = Number(req.params.teacherId)
-  if (!Number.isInteger(teacherId) || teacherId <= 0) return fail(res, 400, 'Invalid teacher id')
-  try {
-    const list = await loadDiscoverTeachers()
-    const teacher = list.find((item) => item.teacherId === teacherId)
-    if (!teacher) return fail(res, 404, 'Teacher not found')
-    ok(res, {
-      ...teacher,
-      reviewSummary: {
-        ratingAvg: teacher.ratingAvg,
-        ratingCount: teacher.ratingCount
+  app.get('/api/teacher/analytics', authRequired('teacher'), async (req, res) => {
+    app.get('/api/teacher/analytics', authRequired('teacher'), async (req, res) => {
+      try {
+        const teacher = await currentUserOrFail(req, res)
+        if (!teacher) return
+        const [requestRows] = await pool.query(
+          `SELECT status, COUNT(*) AS count FROM requests WHERE teacher_name = ? GROUP BY status`,
+          [teacher.nickname]
+        )
+        const [reviewRows] = await pool.query(
+          `SELECT COUNT(*) AS total_reviews, AVG(rating) AS average_rating FROM reviews WHERE teacher_name = ?`,
+          [teacher.nickname]
+        )
+        const counters = requestRows.reduce((acc, row) => ({ ...acc, [row.status]: Number(row.count || 0) }), {})
+        const totalHandled = Object.values(counters).reduce((sum, count) => sum + Number(count || 0), 0)
+        ok(res, {
+          weeklyViews: 120 + totalHandled * 18,
+          totalViews: (120 + totalHandled * 18) * 8,
+          pendingRequests: Number(counters.pending || 0) + Number(counters.matching || 0),
+          scheduledRequests: Number(counters.scheduled || 0),
+          completedRequests: Number(counters.completed || 0),
+          averageRating: Number(reviewRows[0]?.average_rating || 0),
+          totalReviews: Number(reviewRows[0]?.total_reviews || 0),
+          responseRate: totalHandled === 0 ? 0 : (Number(counters.completed || 0) + Number(counters.scheduled || 0)) / totalHandled
+        })
+      } catch (error) {
+        fail(res, 500, error.message)
       }
     })
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
 
-app.post('/api/discover/teachers/:teacherId/contact', authRequired('parent'), async (req, res) => {
-  const teacherId = Number(req.params.teacherId)
-  if (!Number.isInteger(teacherId) || teacherId <= 0) return fail(res, 400, 'Invalid teacher id')
-  try {
-    const teacher = await getUserById(teacherId)
-    if (!teacher || teacher.role !== 'teacher') return fail(res, 404, 'Teacher not found')
-    const [result] = await pool.query(
-      `INSERT INTO conversations (parent_id, teacher_id, last_message, updated_at)
+    app.get('/api/teacher/matches', authRequired('teacher'), async (_req, res) => ok(res, []))
+    app.post('/api/teacher/matches/:id/unlock', authRequired('teacher'), async (_req, res) => fail(res, 404, 'Match not found'))
+    app.post('/api/teacher/matches/:id/accept', authRequired('teacher'), async (_req, res) => fail(res, 404, 'Match not found'))
+    app.post('/api/teacher/matches/:id/reject', authRequired('teacher'), async (_req, res) => fail(res, 404, 'Match not found'))
+    app.get('/api/teacher/unlock-records', authRequired('teacher'), async (_req, res) => ok(res, []))
+    app.get('/api/teacher/dashboard/summary', authRequired('teacher'), async (req, res) => {
+      try {
+        const [membershipRows] = await pool.query('SELECT remaining_unlock FROM memberships WHERE user_id = ?', [req.user.id])
+        ok(res, {
+          newMatchCount: 0,
+          unlockedMatchCount: 0,
+          processingRequestCount: 0,
+          remainingUnlock: Number(membershipRows[0]?.remaining_unlock || 0)
+        })
+      } catch (error) {
+        fail(res, 500, error.message)
+      }
+    })
+
+    app.get('/api/membership/status', authRequired(), async (req, res) => {
+      const defaultName = req.user.role === 'teacher' ? '普通老师' : '普通用户'
+      try {
+        const [rows] = await pool.query('SELECT * FROM memberships WHERE user_id = ?', [req.user.id])
+        if (!rows.length) return ok(res, { planName: defaultName, expireAt: null, remainingUnlock: 0, weeklyPriorityQuota: 0 })
+        const item = rows[0]
+        ok(res, {
+          planName: item.plan_name,
+          expireAt: item.expire_at ? dateOnly(item.expire_at) : null,
+          remainingUnlock: Number(item.remaining_unlock || 0),
+          weeklyPriorityQuota: Number(item.weekly_priority_quota || 0),
+          autoRenew: !!item.auto_renew
+        })
+      } catch (error) {
+        fail(res, 500, error.message)
+      }
+    })
+
+    app.get('/api/membership/plans', async (_req, res) => {
+      try {
+        const [rows] = await pool.query('SELECT * FROM membership_plans')
+        ok(
+          res,
+          rows.map((item) => ({
+            id: item.id,
+            name: item.name,
+            price: Number(item.price || 0),
+            durationMonth: Number(item.duration_month || 1),
+            features: parseArrayField(item.features),
+            recommended: !!item.recommended
+          }))
+        )
+      } catch (error) {
+        fail(res, 500, error.message)
+      }
+    })
+
+    app.post('/api/membership/subscribe', authRequired(), async (req, res) => {
+      const planId = String(req.body?.plan_id || '')
+      const autoRenew = Boolean(req.body?.auto_renew)
+      try {
+        const [plans] = await pool.query('SELECT * FROM membership_plans WHERE id = ? LIMIT 1', [planId])
+        if (!plans.length) return fail(res, 404, 'Plan not found')
+        const plan = plans[0]
+        const expire = new Date()
+        expire.setMonth(expire.getMonth() + Number(plan.duration_month || 1))
+        const unlock = Number(plan.duration_month || 1) * 5
+        const quota = plan.id === 'year' ? 8 : plan.id === 'quarter' ? 5 : 3
+        await pool.query(
+          `INSERT INTO memberships (user_id, plan_name, expire_at, remaining_unlock, weekly_priority_quota, auto_renew)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         plan_name=VALUES(plan_name),
+         expire_at=VALUES(expire_at),
+         remaining_unlock=VALUES(remaining_unlock),
+         weekly_priority_quota=VALUES(weekly_priority_quota),
+         auto_renew=VALUES(auto_renew)`,
+          [req.user.id, plan.name, expire, unlock, quota, autoRenew]
+        )
+        ok(res, {
+          planName: plan.name,
+          expireAt: dateOnly(expire),
+          remainingUnlock: unlock,
+          weeklyPriorityQuota: quota,
+          autoRenew
+        })
+      } catch (error) {
+        fail(res, 500, error.message)
+      }
+    })
+
+    app.get('/api/teacher/membership/status', authRequired('teacher'), async (req, res) => {
+      try {
+        const [rows] = await pool.query('SELECT * FROM memberships WHERE user_id = ?', [req.user.id])
+        if (!rows.length) return ok(res, { planName: '普通老师', expireAt: null, remainingUnlock: 3, weeklyPriorityQuota: 1 })
+        const item = rows[0]
+        ok(res, {
+          planName: item.plan_name,
+          expireAt: item.expire_at ? dateOnly(item.expire_at) : null,
+          remainingUnlock: Number(item.remaining_unlock || 0),
+          weeklyPriorityQuota: Number(item.weekly_priority_quota || 0),
+          autoRenew: !!item.auto_renew
+        })
+      } catch (error) {
+        fail(res, 500, error.message)
+      }
+    })
+    app.get('/api/teacher/membership/plans', authRequired('teacher'), async (_req, res) =>
+      ok(res, [
+        { id: 'bronze', name: '铜牌老师', price: 19.9, durationMonth: 1, features: ['每天 5 次解锁次数', '中部曝光位', '基础数据面板'], recommended: false },
+        { id: 'silver', name: '银牌老师', price: 29.9, durationMonth: 1, features: ['每天 10 次解锁次数', '上部曝光位', '详细报表 + 实时通知'], recommended: true },
+        { id: 'gold', name: '金牌老师', price: 49.9, durationMonth: 1, features: ['无限解锁次数', '顶部置顶曝光', '优先推荐 + 专属客服'], recommended: false }
+      ])
+    )
+    app.post('/api/teacher/membership/subscribe', authRequired('teacher'), async (req, res) => {
+      const planMap = {
+        bronze: { name: '铜牌老师', unlock: 5, quota: 2 },
+        silver: { name: '银牌老师', unlock: 10, quota: 5 },
+        gold: { name: '金牌老师', unlock: 999, quota: 10 }
+      }
+      const selected = planMap[String(req.body?.plan_id || '')]
+      if (!selected) return fail(res, 404, 'Plan not found')
+      try {
+        const expire = new Date()
+        expire.setMonth(expire.getMonth() + 1)
+        await pool.query(
+          `INSERT INTO memberships (user_id, plan_name, expire_at, remaining_unlock, weekly_priority_quota, auto_renew)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         plan_name=VALUES(plan_name),
+         expire_at=VALUES(expire_at),
+         remaining_unlock=VALUES(remaining_unlock),
+         weekly_priority_quota=VALUES(weekly_priority_quota),
+         auto_renew=VALUES(auto_renew)`,
+          [req.user.id, selected.name, expire, selected.unlock, selected.quota, Boolean(req.body?.auto_renew)]
+        )
+        ok(res, {
+          planName: selected.name,
+          expireAt: dateOnly(expire),
+          remainingUnlock: selected.unlock,
+          weeklyPriorityQuota: selected.quota,
+          autoRenew: Boolean(req.body?.auto_renew)
+        })
+      } catch (error) {
+        fail(res, 500, error.message)
+      }
+    })
+
+    app.get('/api/teacher/settings', authRequired('teacher'), async (req, res) => {
+      app.get('/api/teacher/settings', authRequired('teacher'), async (req, res) => {
+        try {
+          const [rows] = await pool.query('SELECT * FROM user_settings WHERE user_id = ?', [req.user.id])
+          ok(res, { notifications: parseObjectField(rows[0]?.notifications), privacy: parseObjectField(rows[0]?.privacy) })
+        } catch (error) {
+          fail(res, 500, error.message)
+        }
+      })
+
+      app.put('/api/teacher/settings/password', authRequired('teacher'), async (req, res) => {
+        app.put('/api/teacher/settings/password', authRequired('teacher'), async (req, res) => {
+          const currentPassword = String(req.body?.current_password || '')
+          const nextPassword = String(req.body?.new_password || '')
+          if (nextPassword.length < 6) return fail(res, 400, 'New password must be at least 6 chars')
+          try {
+            const user = await currentUserOrFail(req, res)
+            if (!user) return
+            if (!(await bcrypt.compare(currentPassword, user.password_hash || ''))) return fail(res, 400, 'Current password is incorrect')
+            await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [await bcrypt.hash(nextPassword, 10), req.user.id])
+            ok(res, { updated: true })
+          } catch (error) {
+            fail(res, 500, error.message)
+          }
+        })
+
+        app.put('/api/teacher/settings/notifications', authRequired('teacher'), async (req, res) => {
+          app.put('/api/teacher/settings/notifications', authRequired('teacher'), async (req, res) => {
+            try {
+              const [rows] = await pool.query('SELECT notifications FROM user_settings WHERE user_id = ?', [req.user.id])
+              const nextOpts = { ...parseObjectField(rows[0]?.notifications), ...(req.body || {}) }
+              await pool.query(
+                'INSERT INTO user_settings (user_id, notifications) VALUES (?, ?) ON DUPLICATE KEY UPDATE notifications=VALUES(notifications)',
+                [req.user.id, JSON.stringify(nextOpts)]
+                [req.user.id, JSON.stringify(nextOpts)]
+              )
+              ok(res, nextOpts)
+            } catch (error) {
+              fail(res, 500, error.message)
+            }
+          })
+
+          app.put('/api/teacher/settings/privacy', authRequired('teacher'), async (req, res) => {
+            app.put('/api/teacher/settings/privacy', authRequired('teacher'), async (req, res) => {
+              try {
+                const [rows] = await pool.query('SELECT privacy FROM user_settings WHERE user_id = ?', [req.user.id])
+                const nextOpts = { ...parseObjectField(rows[0]?.privacy), ...(req.body || {}) }
+                await pool.query(
+                  'INSERT INTO user_settings (user_id, privacy) VALUES (?, ?) ON DUPLICATE KEY UPDATE privacy=VALUES(privacy)',
+                  [req.user.id, JSON.stringify(nextOpts)]
+                  [req.user.id, JSON.stringify(nextOpts)]
+                )
+                ok(res, nextOpts)
+              } catch (error) {
+                fail(res, 500, error.message)
+              }
+            })
+
+            app.get('/api/discover/teachers', async (req, res) => {
+              try {
+                const query = req.query || {}
+                const keyword = String(query.keyword || '').trim().toLowerCase()
+                const subject = String(query.subject || '').trim()
+                const grade = String(query.grade || '').trim()
+                const city = String(query.city || '').trim()
+                const mode = String(query.mode || '').trim()
+                const minPrice = query.min_price === undefined || query.min_price === '' ? null : Number(query.min_price)
+                const maxPrice = query.max_price === undefined || query.max_price === '' ? null : Number(query.max_price)
+                const minRating = query.min_rating === undefined || query.min_rating === '' ? null : Number(query.min_rating)
+                const sort = String(query.sort || 'recommended')
+                const page = Math.max(1, Number(query.page || 1))
+                const pageSize = Math.min(50, Math.max(1, Number(query.page_size || 12)))
+
+                let list = await loadDiscoverTeachers()
+                list = list.filter((item) => {
+                  const haystack = [item.name, item.nickname, item.city, item.district, item.intro, ...item.subjects, ...item.grades]
+                    .join(' ')
+                    .toLowerCase()
+                  if (keyword && !haystack.includes(keyword)) return false
+                  if (subject && !item.subjects.includes(subject)) return false
+                  if (grade && !item.grades.includes(grade)) return false
+                  if (city && item.city !== city) return false
+                  if (mode && mode !== 'all' && item.teachingMode !== mode && item.teachingMode !== 'both') return false
+                  if (minRating !== null && item.ratingAvg < minRating) return false
+                  if (minPrice !== null && item.hourlyPriceMax !== null && item.hourlyPriceMax < minPrice) return false
+                  if (maxPrice !== null && item.hourlyPriceMin !== null && item.hourlyPriceMin > maxPrice) return false
+                  return true
+                })
+
+                const sorters = {
+                  latest: (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime(),
+                  rating_desc: (a, b) => b.ratingAvg - a.ratingAvg || b.ratingCount - a.ratingCount,
+                  price_asc: (a, b) => (a.hourlyPriceMin ?? 999999) - (b.hourlyPriceMin ?? 999999),
+                  price_desc: (a, b) => (b.hourlyPriceMax ?? -1) - (a.hourlyPriceMax ?? -1),
+                  recommended: (a, b) => b.score - a.score
+                }
+                list.sort(sorters[sort] || sorters.recommended)
+                const total = list.length
+                const start = (page - 1) * pageSize
+                ok(res, { list: list.slice(start, start + pageSize), total, page, pageSize })
+              } catch (error) {
+                fail(res, 500, error.message)
+              }
+            })
+
+            app.get('/api/discover/teachers/:teacherId', async (req, res) => {
+              const teacherId = Number(req.params.teacherId)
+              if (!Number.isInteger(teacherId) || teacherId <= 0) return fail(res, 400, 'Invalid teacher id')
+              try {
+                const list = await loadDiscoverTeachers()
+                const teacher = list.find((item) => item.teacherId === teacherId)
+                if (!teacher) return fail(res, 404, 'Teacher not found')
+                ok(res, {
+                  ...teacher,
+                  reviewSummary: {
+                    ratingAvg: teacher.ratingAvg,
+                    ratingCount: teacher.ratingCount
+                  }
+                })
+              } catch (error) {
+                fail(res, 500, error.message)
+              }
+            })
+
+            app.post('/api/discover/teachers/:teacherId/contact', authRequired('parent'), async (req, res) => {
+              const teacherId = Number(req.params.teacherId)
+              if (!Number.isInteger(teacherId) || teacherId <= 0) return fail(res, 400, 'Invalid teacher id')
+              try {
+                const teacher = await getUserById(teacherId)
+                if (!teacher || teacher.role !== 'teacher') return fail(res, 404, 'Teacher not found')
+                const [result] = await pool.query(
+                  `INSERT INTO conversations (parent_id, teacher_id, last_message, updated_at)
        VALUES (?, ?, '', NOW())
        ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id), updated_at=NOW()`,
-      [req.user.id, teacherId]
-    )
-    ok(res, { conversationId: Number(result.insertId), teacherId })
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
+                  [req.user.id, teacherId]
+                )
+                ok(res, { conversationId: Number(result.insertId), teacherId })
+              } catch (error) {
+                fail(res, 500, error.message)
+              }
+            })
 
-app.get('/api/messages/conversations', authRequired(), async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      `SELECT c.id, c.last_message, c.updated_at,
+            app.get('/api/messages/conversations', authRequired(), async (req, res) => {
+              try {
+                const [rows] = await pool.query(
+                  `SELECT c.id, c.last_message, c.updated_at,
               u.id AS contact_id, u.nickname AS contact_name, u.role AS contact_role
          FROM conversations c
          JOIN users u ON (c.parent_id = u.id OR c.teacher_id = u.id)
         WHERE (c.parent_id = ? OR c.teacher_id = ?) AND u.id != ?
         ORDER BY c.updated_at DESC`,
-      [req.user.id, req.user.id, req.user.id]
-    )
-    ok(
-      res,
-      rows.map((item) => ({
-        id: Number(item.id),
-        contactId: Number(item.contact_id),
-        contactName: item.contact_name,
-        contactRole: item.contact_role,
-        lastMessage: item.last_message || '',
-        updatedAt: isoTime(item.updated_at)
-      }))
-    )
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
+                  [req.user.id, req.user.id, req.user.id]
+                )
+                ok(
+                  res,
+                  rows.map((item) => ({
+                    id: Number(item.id),
+                    contactId: Number(item.contact_id),
+                    contactName: item.contact_name,
+                    contactRole: item.contact_role,
+                    lastMessage: item.last_message || '',
+                    updatedAt: isoTime(item.updated_at)
+                  }))
+                )
+              } catch (error) {
+                fail(res, 500, error.message)
+              }
+            })
 
-app.get('/api/messages/unread-count', authRequired(), async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      `SELECT COUNT(*) AS count
+            app.get('/api/messages/unread-count', authRequired(), async (req, res) => {
+              try {
+                const [rows] = await pool.query(
+                  `SELECT COUNT(*) AS count
          FROM messages m
          JOIN conversations c ON m.conversation_id = c.id
         WHERE (c.parent_id = ? OR c.teacher_id = ?)
           AND m.sender_id != ?
           AND m.is_read = FALSE`,
-      [req.user.id, req.user.id, req.user.id]
-    )
-    ok(res, { count: Number(rows[0]?.count || 0) })
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
+                  [req.user.id, req.user.id, req.user.id]
+                )
+                ok(res, { inviteCode: code })
+              } catch (error) {
+                if (String(error?.code || '') === 'ER_NO_SUCH_TABLE') return fail(res, 503, '邀请模块未初始化，请先执行兼容迁移')
+                fail(res, 500, error.message)
+              }
+            })
 
-app.get('/api/messages/:conversationId', authRequired(), async (req, res) => {
-  const conversationId = Number(req.params.conversationId)
-  try {
-    const [rows] = await pool.query(
-      `SELECT m.*
+            app.post('/api/matching/run-weekly', authRequired(), async (req, res) => {
+              try {
+                const result = await runWeeklyMatching()
+                ok(res, result)
+              } catch (error) {
+                fail(res, 500, error.message)
+              }
+            })
+
+            app.get('/api/messages/:conversationId', authRequired(), async (req, res) => {
+              const conversationId = Number(req.params.conversationId)
+              try {
+                const [rows] = await pool.query(
+                  `SELECT m.*
          FROM messages m
          JOIN conversations c ON c.id = m.conversation_id
         WHERE m.conversation_id = ?
           AND (c.parent_id = ? OR c.teacher_id = ?)
         ORDER BY m.created_at ASC`,
-      [conversationId, req.user.id, req.user.id]
-    )
-    ok(
-      res,
-      rows.map((item) => ({
-        id: Number(item.id),
-        conversationId: Number(item.conversation_id),
-        senderId: Number(item.sender_id),
-        content: item.content,
-        isRead: !!item.is_read,
-        createdAt: isoTime(item.created_at)
-      }))
-    )
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
+                  [conversationId, req.user.id, req.user.id]
+                )
+                ok(
+                  res,
+                  rows.map((item) => ({
+                    id: Number(item.id),
+                    conversationId: Number(item.conversation_id),
+                    senderId: Number(item.sender_id),
+                    content: item.content,
+                    isRead: !!item.is_read,
+                    createdAt: isoTime(item.created_at)
+                  }))
+                )
+              } catch (error) {
+                fail(res, 500, error.message)
+              }
+            })
 
-app.post('/api/messages/:conversationId/read', authRequired(), async (req, res) => {
-  const conversationId = Number(req.params.conversationId)
-  try {
-    await pool.query(
-      `UPDATE messages m
+            app.post('/api/messages/:conversationId/read', authRequired(), async (req, res) => {
+              const conversationId = Number(req.params.conversationId)
+              try {
+                await pool.query(
+                  `UPDATE messages m
          JOIN conversations c ON c.id = m.conversation_id
           SET m.is_read = TRUE
         WHERE m.conversation_id = ?
           AND (c.parent_id = ? OR c.teacher_id = ?)
           AND m.sender_id != ?
           AND m.is_read = FALSE`,
-      [conversationId, req.user.id, req.user.id, req.user.id]
-    )
-    ok(res, { success: true })
-  } catch (error) {
-    fail(res, 500, error.message)
-  }
-})
+                  [conversationId, req.user.id, req.user.id, req.user.id]
+                )
+                await emitUnreadMessageCount(userId)
+                ok(res, { success: true })
+              } catch (error) {
+                fail(res, 500, error.message)
+              }
+            })
 
-io.use((socket, next) => {
-  const tokenFromAuth = socket.handshake.auth?.token
-  const tokenFromHeader = String(socket.handshake.headers?.authorization || '')
-    .replace(/^Bearer\s+/i, '')
-    .trim()
-  const user = verifyAuthToken(tokenFromAuth || tokenFromHeader)
-  if (!user) return next(new Error('Unauthorized'))
-  socket.user = user
-  next()
-})
+            io.use((socket, next) => {
+              const tokenFromAuth = socket.handshake.auth?.token
+              const tokenFromHeader = String(socket.handshake.headers?.authorization || '')
+                .replace(/^Bearer\s+/i, '')
+                .trim()
+              const user = verifyAuthToken(tokenFromAuth || tokenFromHeader)
+              if (!user) return next(new Error('Unauthorized'))
+              socket.user = user
+              next()
+            })
 
-io.on('connection', (socket) => {
-  const userId = Number(socket.user.id)
-  socket.join(`user_${userId}`)
+            io.on('connection', (socket) => {
+              const userId = Number(socket.user.id)
+              socket.join(`user_${userId}`)
+              emitUnreadMessageCount(userId).catch(() => { })
 
-  socket.on('send_message', async (data) => {
-    const conversationId = Number(data?.conversationId || 0)
-    const content = String(data?.content || '').trim()
-    if (!conversationId || !content) return
+              socket.on('send_message', async (data) => {
+                const conversationId = Number(data?.conversationId || 0)
+                const content = String(data?.content || '').trim()
+                if (!conversationId || !content) return
 
-    const conn = await pool.getConnection()
-    try {
-      await conn.beginTransaction()
-      const [conversationRows] = await conn.query('SELECT * FROM conversations WHERE id = ? LIMIT 1', [conversationId])
-      const conversation = conversationRows[0]
-      if (!conversation || (conversation.parent_id !== userId && conversation.teacher_id !== userId)) {
-        await conn.rollback()
-        return
-      }
-      const receiverId = conversation.parent_id === userId ? conversation.teacher_id : conversation.parent_id
-      const [result] = await conn.query('INSERT INTO messages (conversation_id, sender_id, content) VALUES (?, ?, ?)', [
-        conversationId,
-        userId,
-        content
-      ])
-      await conn.query('UPDATE conversations SET last_message = ?, updated_at = NOW() WHERE id = ?', [content, conversationId])
-      await conn.commit()
+                const conn = await pool.getConnection()
+                try {
+                  await conn.beginTransaction()
+                  const [conversationRows] = await conn.query('SELECT * FROM conversations WHERE id = ? LIMIT 1', [conversationId])
+                  const conversation = conversationRows[0]
+                  if (!conversation || (conversation.parent_id !== userId && conversation.teacher_id !== userId)) {
+                    await conn.rollback()
+                    return
+                  }
+                  const receiverId = conversation.parent_id === userId ? conversation.teacher_id : conversation.parent_id
+                  const [result] = await conn.query('INSERT INTO messages (conversation_id, sender_id, content) VALUES (?, ?, ?)', [
+                    conversationId,
+                    userId,
+                    content
+                  ])
+                  await conn.query('UPDATE conversations SET last_message = ?, updated_at = NOW() WHERE id = ?', [content, conversationId])
+                  await conn.commit()
 
-      const [messageRows] = await pool.query('SELECT * FROM messages WHERE id = ?', [result.insertId])
-      const saved = messageRows[0]
-      const payload = {
-        id: Number(saved.id),
-        conversationId: Number(saved.conversation_id),
-        senderId: Number(saved.sender_id),
-        content: saved.content,
-        isRead: !!saved.is_read,
-        createdAt: isoTime(saved.created_at)
-      }
-      io.to(`user_${receiverId}`).emit('receive_message', payload)
-      socket.emit('message_sent', payload)
-    } catch (error) {
-      await conn.rollback()
-      console.error('Failed to send message:', error)
-    } finally {
-      conn.release()
-    }
-  })
-})
+                  const [messageRows] = await pool.query('SELECT * FROM messages WHERE id = ?', [result.insertId])
+                  const saved = messageRows[0]
+                  const payload = {
+                    id: Number(saved.id),
+                    conversationId: Number(saved.conversation_id),
+                    senderId: Number(saved.sender_id),
+                    content: saved.content,
+                    isRead: !!saved.is_read,
+                    createdAt: isoTime(saved.created_at)
+                  }
+                  io.to(`user_${receiverId}`).emit('receive_message', payload)
+                  socket.emit('message_sent', payload)
+                  emitUnreadMessageCount(receiverId).catch(() => { })
+                } catch (error) {
+                  await conn.rollback()
+                  console.error('Failed to send message:', error)
+                } finally {
+                  conn.release()
+                }
+              })
+            })
 
-app.use((_req, res) => fail(res, 404, 'Not Found'))
+            app.use((_req, res) => fail(res, 404, 'Not Found'))
 
-httpServer.listen(PORT, () => {
-  console.log(`[api] running at http://localhost:${PORT} (with WebSocket)`)
-})
+            httpServer.listen(PORT, () => {
+              console.log(`[api] running at http://localhost:${PORT} (with WebSocket)`)
+            })
