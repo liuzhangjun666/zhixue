@@ -30,6 +30,7 @@ export interface ParentRequestDTO {
   createdAt: string
   status: RequestStatus
   teacherName?: string
+  description?: string
 }
 
 export interface ReviewDTO {
@@ -126,7 +127,8 @@ const normalizeRequest = (raw: Record<string, any>): ParentRequestDTO => ({
   schedule: String(raw.schedule || raw.preferred_time || ''),
   createdAt: String(raw.createdAt || raw.created_at || ''),
   status: parseStatus(raw.status),
-  teacherName: raw.teacherName || raw.teacher_name || raw.teacher?.name || ''
+  teacherName: raw.teacherName || raw.teacher_name || raw.teacher?.name || '',
+  description: String(raw.description || raw.detail || '')
 })
 
 const normalizeReview = (raw: Record<string, any>): ReviewDTO => ({
@@ -192,6 +194,11 @@ export const parentApi = {
     const payload = await request(ENDPOINTS.requests)
     const list = unwrapData(payload, [] as Record<string, any>[])
     return Array.isArray(list) ? list.map(normalizeRequest) : []
+  },
+
+  async getRequestDetail(id: number) {
+    const payload = await request(`${ENDPOINTS.requests}/${id}`)
+    return normalizeRequest(unwrapData(payload, {} as Record<string, any>))
   },
 
   async createRequest(payload: Partial<ParentRequestDTO>) {

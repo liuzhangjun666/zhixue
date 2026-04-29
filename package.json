@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "api:dev": "node server/src/index.js",
+    "api:migrate:compat": "node server/src/migrate-compat.js",
+    "smoke:auth": "node server/scripts/smoke-auth.js",
     "build": "vite build",
     "preview": "vite preview"
   },

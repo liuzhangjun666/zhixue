@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import GlassCard from '../components/GlassCard.vue'
+import { parentRegister, setAuthSession } from '../api/auth'
 
 const router = useRouter()
 const currentStep = ref(1)
@@ -16,19 +17,45 @@ const agree = ref(false)
 const nickname = ref('')
 const gender = ref('')
 const grade = ref('')
+const loading = ref(false)
+const errorText = ref('')
 
 const nextStep = () => {
   if (currentStep.value === 1 && !agree.value) {
     alert('请先同意用户协议')
     return
   }
+  if (currentStep.value === 1 && password.value !== confirmPassword.value) {
+    errorText.value = '两次密码输入不一致'
+    return
+  }
+  errorText.value = ''
   if (currentStep.value < 3) {
     currentStep.value++
   }
 }
 
-const finishRegister = () => {
-  router.push('/parent-center')
+const finishRegister = async () => {
+  if (!phone.value || !password.value || !nickname.value) {
+    errorText.value = '请先填写必要信息'
+    return
+  }
+  loading.value = true
+  errorText.value = ''
+  try {
+    const data = await parentRegister({
+      phone: phone.value.trim(),
+      password: password.value,
+      nickname: nickname.value.trim()
+    })
+    if (!data?.token || !data?.user) throw new Error('注册返回数据不完整')
+    setAuthSession(data.token, data.user)
+    router.push('/parent-center')
+  } catch (error) {
+    errorText.value = (error && error.message) || '注册失败，请稍后重试'
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 
@@ -152,8 +179,12 @@ const finishRegister = () => {
           <div class="success-icon mb-3">✅</div>
           <h2 class="mb-2">注册成功！</h2>
           <p class="text-sub mb-4">欢迎加入知学空间，开始寻找优秀的学习陪伴者吧。</p>
-          <button @click="finishRegister" class="btn btn-primary w-100">前往个人中心</button>
+          <button @click="finishRegister" class="btn btn-primary w-100" :disabled="loading">
+            {{ loading ? '注册中...' : '前往个人中心' }}
+          </button>
         </div>
+
+        <p v-if="errorText" class="error-text mt-3">{{ errorText }}</p>
         
         <div v-if="currentStep === 1" class="text-center mt-4 text-sub">
           已有账号？ <router-link to="/login" class="text-primary">立即登录</router-link>
@@ -303,6 +334,11 @@ const finishRegister = () => {
 
 .success-icon {
   font-size: 64px;
+}
+
+.error-text {
+  color: #e11d48;
+  font-size: 13px;
 }
 
 @media (max-width: 992px) {

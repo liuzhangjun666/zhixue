@@ -2,6 +2,8 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Bell, User, LogOut } from 'lucide-vue-next'
+import { AUTH_TOKEN_STORAGE_KEY, AUTH_USER_STORAGE_KEY, request, unwrapData } from '../api/http'
+import { logout } from '../api/auth'
 
 const router = useRouter()
 
@@ -10,6 +12,16 @@ const currentPath = computed(() => route.path)
 
 const isLoggedIn = computed(() => !['/login', '/register', '/teacher-auth'].includes(route.path))
 const userRole = computed(() => {
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = window.localStorage.getItem(AUTH_USER_STORAGE_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed?.role === 'teacher') return 'teacher'
+        if (parsed?.role === 'parent') return 'parent'
+      }
+    } catch {}
+  }
   if (route.path.startsWith('/teacher')) return 'teacher'
   return 'parent'
 })
@@ -50,12 +62,13 @@ const toggleUserMenu = () => {
 
 const handleLogout = () => {
   showUserMenu.value = false
-  router.push('/login')
+  logout().finally(() => {
+    router.push('/login')
+  })
 }
 
 const fetchUnreadCount = async () => {
   if (!isLoggedIn.value) return
-  const userId = userRole.value === 'teacher' ? 2 : 1
   try {
     const res = await fetch(`http://localhost:8000/api/messages/unread-count?userId=${userId}`)
     const { data } = await res.json()

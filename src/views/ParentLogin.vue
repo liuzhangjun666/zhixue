@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { parentLogin, setAuthSession } from '../api/auth'
 
 const router = useRouter()
 const phone = ref<string>('')
 const password = ref<string>('')
 const showPassword = ref<boolean>(false)
 const loading = ref<boolean>(false)
+const errorText = ref<string>('')
 const bgCanvas = ref<HTMLCanvasElement | null>(null)
 
 let animationFrameId: number
@@ -101,13 +103,22 @@ onUnmounted(() => {
   cancelAnimationFrame(animationFrameId)
 })
 
-const handleLogin = () => {
+const handleLogin = async () => {
   if (!phone.value || !password.value) return
   loading.value = true
-  setTimeout(() => {
-    loading.value = false
+  errorText.value = ''
+  try {
+    const data = await parentLogin({ phone: phone.value.trim(), password: password.value })
+    if (!data?.token || !data?.user) {
+      throw new Error('登录返回数据不完整')
+    }
+    setAuthSession(data.token, data.user)
     router.push('/parent-center')
-  }, 1000)
+  } catch (error) {
+    errorText.value = (error as Error).message || '登录失败，请稍后重试'
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 
@@ -184,6 +195,8 @@ const handleLogin = () => {
           <button type="submit" class="btn-apple-primary" :disabled="loading">
             {{ loading ? '验证中...' : '登录' }}
           </button>
+
+          <p v-if="errorText" class="error-text">{{ errorText }}</p>
           
           <div class="form-divider">
             <span>或使用以下方式登录</span>
@@ -520,6 +533,12 @@ const handleLogin = () => {
 .teacher-portal-link a:hover {
   opacity: 1;
   text-decoration: underline;
+}
+
+.error-text {
+  color: #e11d48;
+  font-size: 13px;
+  margin: 4px 0 0;
 }
 
 @media (max-width: 992px) {
