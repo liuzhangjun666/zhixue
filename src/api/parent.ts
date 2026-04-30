@@ -244,6 +244,11 @@ export const parentApi = {
     return unwrapData(res, {} as Record<string, any>)
   },
 
+  async updateRequest(id: number, payload: Partial<ParentRequestDTO>) {
+    const res = await request(`${ENDPOINTS.requests}/${id}`, { method: 'PUT', body: payload })
+    return unwrapData(res, {} as Record<string, any>)
+  },
+
   async updateRequestStatus(id: number, status: RequestStatus) {
     await request(`${ENDPOINTS.requests}/${id}/status`, { method: 'PATCH', body: { status } })
   },

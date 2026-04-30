@@ -1,7 +1,7 @@
 ﻿<script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Edit3, ClipboardList, Star, BarChart3, Crown, Settings, ChevronRight, FileText, ListChecks, Bell } from 'lucide-vue-next'
+import { Edit3, ClipboardList, Star, BarChart3, Crown, Settings, ChevronRight, FileText, ListChecks, Bell, X } from 'lucide-vue-next'
 import { teacherApi, type DashboardSummaryDTO, type TeacherInviteSummaryDTO, type TeacherMembershipStatusDTO, type TeacherProfileDTO } from '../api/teacher'
 
 interface MenuItem {
@@ -30,6 +30,7 @@ const summary = ref<DashboardSummaryDTO>({
 const invite = ref<TeacherInviteSummaryDTO>({ inviteCode: '', totalInvited: 0, verifiedInvited: 0, extraMatchQuota: 0 })
 const loading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
+const mobileMenuOpen = ref(false)
 
 const cachedAvatar = ref('')
 
@@ -125,6 +126,7 @@ const onFileChange = (event: Event) => {
 
 const navigateTo = (path: string) => {
   if (!path) return
+  mobileMenuOpen.value = false
   router.push(path).catch(() => {})
 }
 
@@ -167,6 +169,7 @@ onMounted(() => {
           <div>累计解锁：{{ summary.totalUnlockCount }} 次</div>
         </div>
         <button class="btn-membership" @click="navigateTo('/teacher-center/vip')">提升曝光</button>
+        <button class="mobile-menu-trigger" @click="mobileMenuOpen = true">常用功能</button>
       </div>
 
       <div class="teacher-card menu-card">
@@ -203,6 +206,28 @@ onMounted(() => {
           </transition>
         </router-view>
       </main>
+    </div>
+
+    <div v-if="mobileMenuOpen" class="mobile-menu-overlay" @click.self="mobileMenuOpen = false">
+      <div class="mobile-menu-sheet">
+        <div class="mobile-menu-header">
+          <h3>常用功能</h3>
+          <button class="mobile-close-btn" @click="mobileMenuOpen = false" aria-label="关闭常用功能">
+            <X />
+          </button>
+        </div>
+        <ul>
+          <li v-for="item in menuItems" :key="`mobile-${item.path}`">
+            <button class="menu-item" :class="{ active: route.path === item.path, highlight: item.highlight }" @click="navigateTo(item.path)">
+              <span class="menu-left">
+                <component :is="item.icon" class="menu-icon" />
+                <span>{{ item.title }}</span>
+              </span>
+              <ChevronRight class="menu-arrow" />
+            </button>
+          </li>
+        </ul>
+      </div>
     </div>
   </div>
 </template>
@@ -422,6 +447,21 @@ onMounted(() => {
   color: #111827;
 }
 
+.mobile-menu-trigger {
+  display: none;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  padding: 10px 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mobile-menu-overlay {
+  display: none;
+}
+
 .menu-item:hover {
   background: #f3f4f6;
 }
@@ -480,12 +520,12 @@ ul {
 
   .teacher-sidebar {
     width: 100%;
-    order: 2;
+    order: 1;
     gap: 14px;
   }
 
   .teacher-content-area {
-    order: 1;
+    order: 2;
     width: 100%;
   }
 
@@ -519,6 +559,60 @@ ul {
     min-height: 46px;
     height: auto;
     padding: 10px 12px;
+  }
+
+  .menu-card {
+    display: none;
+  }
+
+  .mobile-menu-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .mobile-menu-overlay {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.38);
+    z-index: 1200;
+    align-items: flex-end;
+  }
+
+  .mobile-menu-sheet {
+    width: 100%;
+    max-height: 78vh;
+    overflow-y: auto;
+    background: #fff;
+    border-radius: 18px 18px 0 0;
+    padding: 14px 12px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .mobile-menu-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .mobile-menu-header h3 {
+    margin: 0;
+    font-size: 18px;
+    color: #111827;
+  }
+
+  .mobile-close-btn {
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 999px;
+    background: #f3f4f6;
+    color: #374151;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
   }
 }
 

@@ -22,6 +22,7 @@ const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || DEFAULT_AUTH_TOKEN_SE
 const AUTH_TOKEN_EXPIRES_IN_SECONDS = Number(process.env.AUTH_TOKEN_EXPIRES_IN_SECONDS || 60 * 60 * 24 * 7)
 const SMS_CODE_TTL_SECONDS = 300
 const smsCodeStore = new Map()
+const DEV_FALLBACK_SMS_CODE = String(process.env.DEV_FALLBACK_SMS_CODE || '123456').trim()
 const SMS_PROVIDER = String(process.env.SMS_PROVIDER || 'mock').trim().toLowerCase()
 const SMS_WEBHOOK_URL = String(process.env.SMS_WEBHOOK_URL || '').trim()
 const SMS_WEBHOOK_TOKEN = String(process.env.SMS_WEBHOOK_TOKEN || '').trim()
@@ -29,6 +30,12 @@ const SMS_SIGN_NAME = String(process.env.SMS_SIGN_NAME || '知学空间').trim()
 const SMS_VERIFY_TEMPLATE = String(process.env.SMS_VERIFY_TEMPLATE || 'VERIFY_CODE').trim()
 const SMS_RENEW_TEMPLATE = String(process.env.SMS_RENEW_TEMPLATE || 'AUTO_RENEW_REMINDER').trim()
 const SMS_TIMEOUT_MS = Math.max(1000, Number(process.env.SMS_TIMEOUT_MS || 5000))
+const SMS_REGION = String(process.env.SMS_REGION || 'ap-guangzhou').trim()
+const SMS_TENCENT_SECRET_ID = String(process.env.SMS_TENCENT_SECRET_ID || '').trim()
+const SMS_TENCENT_SECRET_KEY = String(process.env.SMS_TENCENT_SECRET_KEY || '').trim()
+const SMS_TENCENT_SDK_APP_ID = String(process.env.SMS_TENCENT_SDK_APP_ID || '').trim()
+const SMS_TENCENT_VERIFY_TEMPLATE_ID = String(process.env.SMS_TENCENT_VERIFY_TEMPLATE_ID || SMS_VERIFY_TEMPLATE || '').trim()
+const SMS_TENCENT_RENEW_TEMPLATE_ID = String(process.env.SMS_TENCENT_RENEW_TEMPLATE_ID || SMS_RENEW_TEMPLATE || '').trim()
 
 if (process.env.NODE_ENV === 'production' && AUTH_TOKEN_SECRET === DEFAULT_AUTH_TOKEN_SECRET) {
   throw new Error('AUTH_TOKEN_SECRET must be set in production')
@@ -165,7 +172,11 @@ const issueSmsCode = (role, phone) => {
   return ''
 }
 
-const verifySmsCode = (role, phone, code) => {
+const isDevFallbackCode = (code) =>
+  process.env.NODE_ENV !== 'production' && String(code || '').trim() === DEV_FALLBACK_SMS_CODE
+
+const checkSmsCode = (role, phone, code) => {
+  if (isDevFallbackCode(code)) return true
   const key = createSmsKey(role, phone)
   const payload = smsCodeStore.get(key)
   if (!payload) return false
@@ -173,7 +184,13 @@ const verifySmsCode = (role, phone, code) => {
     smsCodeStore.delete(key)
     return false
   }
-  if (String(payload.code) !== String(code || '')) return false
+  return String(payload.code) === String(code || '')
+}
+
+const verifySmsCode = (role, phone, code) => {
+  if (isDevFallbackCode(code)) return true
+  if (!checkSmsCode(role, phone, code)) return false
+  const key = createSmsKey(role, phone)
   smsCodeStore.delete(key)
   return true
 }
@@ -184,9 +201,104 @@ const maskPhone = (phone) => {
   return `${text.slice(0, 3)}****${text.slice(-4)}`
 }
 
+const normalizeMainlandPhone = (value) => {
+  const raw = String(value || '').trim()
+  const digits = raw.replace(/\D/g, '')
+  if (/^86\d{11}$/.test(digits)) return digits.slice(2)
+  if (/^\d{11}$/.test(digits)) return digits
+  return ''
+}
+
+const sha256Hex = (content) => crypto.createHash('sha256').update(content, 'utf8').digest('hex')
+const hmacSha256 = (key, content, encoding) => crypto.createHmac('sha256', key).update(content, 'utf8').digest(encoding)
+
+const sendTencentSms = async ({ phone, templateCode, templateParams, messageType }) => {
+  if (!SMS_TENCENT_SECRET_ID || !SMS_TENCENT_SECRET_KEY || !SMS_TENCENT_SDK_APP_ID) {
+    return { sent: false, reason: 'missing tencent sms credentials' }
+  }
+  const mainland = normalizeMainlandPhone(phone)
+  if (!mainland) return { sent: false, reason: 'invalid mainland phone number' }
+  const templateId =
+    messageType === 'membership_renew_reminder'
+      ? SMS_TENCENT_RENEW_TEMPLATE_ID || String(templateCode || '')
+      : SMS_TENCENT_VERIFY_TEMPLATE_ID || String(templateCode || '')
+  if (!templateId) return { sent: false, reason: 'missing template id' }
+  const templateParamSet =
+    messageType === 'membership_renew_reminder'
+      ? [String(templateParams?.nickname || ''), String(templateParams?.planName || ''), String(templateParams?.expireAt || '')]
+      : [String(templateParams?.code || ''), String(templateParams?.ttlMinutes || '')]
+
+  const body = JSON.stringify({
+    PhoneNumberSet: [`+86${mainland}`],
+    SmsSdkAppId: SMS_TENCENT_SDK_APP_ID,
+    SignName: SMS_SIGN_NAME,
+    TemplateId: templateId,
+    TemplateParamSet: templateParamSet,
+    SessionContext: String(messageType || '')
+  })
+
+  const service = 'sms'
+  const host = 'sms.tencentcloudapi.com'
+  const endpoint = `https://${host}/`
+  const action = 'SendSms'
+  const version = '2021-01-11'
+  const timestamp = Math.floor(Date.now() / 1000)
+  const date = new Date(timestamp * 1000).toISOString().slice(0, 10)
+  const canonicalHeaders = `content-type:application/json; charset=utf-8\nhost:${host}\nx-tc-action:${action.toLowerCase()}\n`
+  const signedHeaders = 'content-type;host;x-tc-action'
+  const canonicalRequest = `POST\n/\n\n${canonicalHeaders}\n${signedHeaders}\n${sha256Hex(body)}`
+  const credentialScope = `${date}/${service}/tc3_request`
+  const stringToSign = `TC3-HMAC-SHA256\n${timestamp}\n${credentialScope}\n${sha256Hex(canonicalRequest)}`
+  const secretDate = hmacSha256(`TC3${SMS_TENCENT_SECRET_KEY}`, date)
+  const secretService = hmacSha256(secretDate, service)
+  const secretSigning = hmacSha256(secretService, 'tc3_request')
+  const signature = hmacSha256(secretSigning, stringToSign, 'hex')
+  const authorization = `TC3-HMAC-SHA256 Credential=${SMS_TENCENT_SECRET_ID}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), SMS_TIMEOUT_MS)
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: authorization,
+        'Content-Type': 'application/json; charset=utf-8',
+        Host: host,
+        'X-TC-Action': action,
+        'X-TC-Timestamp': String(timestamp),
+        'X-TC-Version': version,
+        'X-TC-Region': SMS_REGION
+      },
+      body,
+      signal: controller.signal
+    })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      return { sent: false, reason: `http ${response.status}` }
+    }
+    const apiError = payload?.Response?.Error
+    if (apiError) {
+      return { sent: false, reason: `${apiError.Code || 'SmsError'} ${apiError.Message || ''}`.trim() }
+    }
+    const status = payload?.Response?.SendStatusSet?.[0]
+    if (status && status.Code && status.Code !== 'Ok') {
+      return { sent: false, reason: `${status.Code} ${status.Message || ''}`.trim() }
+    }
+    return { sent: true, mock: false, provider: 'tencent' }
+  } catch (error) {
+    return { sent: false, reason: error?.message || 'unknown error' }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 const sendSms = async ({ phone, templateCode, templateParams, messageType }) => {
   const normalizedPhone = String(phone || '').replace(/\s+/g, '')
   if (!normalizedPhone) return { sent: false, reason: 'missing phone' }
+
+  if (SMS_PROVIDER === 'tencent') {
+    return sendTencentSms({ phone: normalizedPhone, templateCode, templateParams, messageType })
+  }
 
   if (!SMS_WEBHOOK_URL || SMS_PROVIDER === 'mock') {
     console.log(
@@ -348,6 +460,19 @@ const ensureColumn = async (tableName, columnName, ddl) => {
 const ensureMatchingSchema = async () => {
   await ensureColumn('requests', 'description', 'description TEXT')
   await ensureColumn('memberships', 'renew_reminder_sent_at', 'renew_reminder_sent_at DATETIME NULL')
+  await ensureColumn('teacher_profiles', 'teaching_mode', "teaching_mode VARCHAR(32) NOT NULL DEFAULT 'both'")
+  await ensureColumn('teacher_profiles', 'available_time_text', "available_time_text VARCHAR(255) NOT NULL DEFAULT ''")
+  await ensureColumn('teacher_profiles', 'rating_avg', 'rating_avg DECIMAL(3,2) NOT NULL DEFAULT 0')
+  await ensureColumn('teacher_profiles', 'rating_count', 'rating_count INT NOT NULL DEFAULT 0')
+  await ensureColumn('teacher_profiles', 'teaching_style', "teaching_style VARCHAR(64) NOT NULL DEFAULT ''")
+  await ensureColumn('teacher_profiles', 'student_type', "student_type VARCHAR(64) NOT NULL DEFAULT ''")
+  await ensureColumn('teacher_profiles', 'areas', 'areas JSON')
+  await ensureColumn('teacher_profiles', 'verify_status', "verify_status VARCHAR(32) NOT NULL DEFAULT 'pending'")
+  await ensureColumn('teacher_profiles', 'verify_remark', "verify_remark VARCHAR(255) NOT NULL DEFAULT ''")
+  await ensureColumn('teacher_profiles', 'verified', 'verified TINYINT(1) NOT NULL DEFAULT 0')
+  await ensureColumn('teacher_profiles', 'is_active', 'is_active TINYINT(1) NOT NULL DEFAULT 1')
+  await ensureColumn('teacher_profiles', 'hourly_price_min', 'hourly_price_min DECIMAL(10,2) NULL')
+  await ensureColumn('teacher_profiles', 'hourly_price_max', 'hourly_price_max DECIMAL(10,2) NULL')
   await ensureColumn('matches', 'parent_accept_status', "parent_accept_status ENUM('pending','accepted','rejected') NOT NULL DEFAULT 'pending'")
   await ensureColumn('matches', 'teacher_accept_status', "teacher_accept_status ENUM('pending','accepted','rejected') NOT NULL DEFAULT 'pending'")
   await ensureColumn('matches', 'unlock_granted', 'unlock_granted TINYINT(1) NOT NULL DEFAULT 0')
@@ -673,14 +798,32 @@ app.post('/api/auth/parent/register', async (req, res) => {
 app.post('/api/auth/parent/send-code', async (req, res) => {
   const phone = String(req.body?.phone || '').trim()
   if (!phone) return fail(res, 400, 'phone is required')
+  const [exists] = await pool.query('SELECT id FROM users WHERE phone = ? LIMIT 1', [phone])
+  if (exists.length) return fail(res, 409, '手机号已注册')
   const debugCode = issueSmsCode('parent', phone)
   const smsResult = await sendVerificationSms('parent', phone, debugCode)
-  if (!smsResult.sent) return fail(res, 500, '短信发送失败，请稍后重试')
+  if (!smsResult.sent) {
+    const reason = String(smsResult.reason || '').trim()
+    const message =
+      process.env.NODE_ENV === 'production'
+        ? '短信发送失败，请稍后重试'
+        : `短信发送失败，请稍后重试${reason ? `（${reason}）` : ''}`
+    return fail(res, 500, message)
+  }
   ok(res, {
     sent: true,
     ttlSeconds: SMS_CODE_TTL_SECONDS,
-    debugCode: process.env.NODE_ENV === 'production' ? undefined : debugCode
+    debugCode: process.env.NODE_ENV === 'production' ? undefined : debugCode,
+    fallbackCode: process.env.NODE_ENV === 'production' ? undefined : DEV_FALLBACK_SMS_CODE
   })
+})
+
+app.post('/api/auth/parent/verify-code', async (req, res) => {
+  const phone = String(req.body?.phone || '').trim()
+  const code = String(req.body?.code || '').trim()
+  if (!phone || !code) return fail(res, 400, 'phone and code are required')
+  if (!checkSmsCode('parent', phone, code)) return fail(res, 400, '验证码错误或已过期')
+  ok(res, { verified: true }, '验证码校验通过')
 })
 
 app.post('/api/auth/parent/login', async (req, res) => {
@@ -689,7 +832,7 @@ app.post('/api/auth/parent/login', async (req, res) => {
   if (!phone || !password) return fail(res, 400, 'phone and password are required')
   try {
     const user = await getUserByPhone(phone, 'parent')
-    if (!user || !(await bcrypt.compare(password, user.password_hash || ''))) return fail(res, 401, 'Unauthorized')
+    if (!user || !(await bcrypt.compare(password, user.password_hash || ''))) return fail(res, 401, '用户名或密码错误')
     ok(res, buildAuthPayload(user), '登录成功')
   } catch (error) {
     fail(res, 500, error.message)
@@ -750,7 +893,7 @@ app.post('/api/auth/teacher/login', async (req, res) => {
   if (!phone || !password) return fail(res, 400, 'phone and password are required')
   try {
     const user = await getUserByPhone(phone, 'teacher')
-    if (!user || !(await bcrypt.compare(password, user.password_hash || ''))) return fail(res, 401, 'Unauthorized')
+    if (!user || !(await bcrypt.compare(password, user.password_hash || ''))) return fail(res, 401, '用户名或密码错误')
     await ensureTeacherProfile(user)
     ok(res, buildAuthPayload(user), '登录成功')
   } catch (error) {
@@ -774,17 +917,38 @@ app.post('/api/auth/logout', authRequired(), (_req, res) => ok(res, { success: t
 app.post('/api/teacher/auth/send-code', async (req, res) => {
   const phone = String(req.body?.phone || '').trim()
   if (!phone) return fail(res, 400, 'phone is required')
+  const [exists] = await pool.query('SELECT id FROM users WHERE phone = ? LIMIT 1', [phone])
+  if (exists.length) return fail(res, 409, '手机号已注册')
   const debugCode = issueSmsCode('teacher', phone)
   const smsResult = await sendVerificationSms('teacher', phone, debugCode)
-  if (!smsResult.sent) return fail(res, 500, '短信发送失败，请稍后重试')
+  if (!smsResult.sent) {
+    const reason = String(smsResult.reason || '').trim()
+    const message =
+      process.env.NODE_ENV === 'production'
+        ? '短信发送失败，请稍后重试'
+        : `短信发送失败，请稍后重试${reason ? `（${reason}）` : ''}`
+    return fail(res, 500, message)
+  }
   ok(res, {
     sent: true,
     ttlSeconds: SMS_CODE_TTL_SECONDS,
-    debugCode: process.env.NODE_ENV === 'production' ? undefined : debugCode
+    debugCode: process.env.NODE_ENV === 'production' ? undefined : debugCode,
+    fallbackCode: process.env.NODE_ENV === 'production' ? undefined : DEV_FALLBACK_SMS_CODE
   })
+})
+app.post('/api/auth/teacher/verify-code', async (req, res) => {
+  const phone = String(req.body?.phone || '').trim()
+  const code = String(req.body?.code || '').trim()
+  if (!phone || !code) return fail(res, 400, 'phone and code are required')
+  if (!checkSmsCode('teacher', phone, code)) return fail(res, 400, '验证码错误或已过期')
+  ok(res, { verified: true }, '验证码校验通过')
 })
 app.post('/api/teacher/auth/register', async (req, res) => {
   req.url = '/api/auth/teacher/register'
+  app._router.handle(req, res, () => {})
+})
+app.post('/api/teacher/auth/verify-code', async (req, res) => {
+  req.url = '/api/auth/teacher/verify-code'
   app._router.handle(req, res, () => {})
 })
 app.post('/api/teacher/auth/login', async (req, res) => {
@@ -871,21 +1035,111 @@ app.post('/api/parent/requests', authRequired('parent'), async (req, res) => {
   const title = String(p.title || '').trim()
   if (!title) return fail(res, 400, 'title is required')
   try {
-    const [result] = await pool.query(
-      `INSERT INTO requests (parent_id, title, subject, grade, budget, schedule, description, status, teacher_name)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-      [req.user.id, title, String(p.subject || ''), String(p.grade || ''), String(p.budget || ''), String(p.schedule || ''), String(p.description || ''), String(p.teacherName || '')]
-    )
-    ok(res, { id: result.insertId })
-  } catch (error) {
-    if (isOptionalSchemaError(error)) {
+    let requestId = 0
+    try {
+      const [result] = await pool.query(
+        `INSERT INTO requests (parent_id, title, subject, grade, budget, schedule, description, status, teacher_name)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+        [req.user.id, title, String(p.subject || ''), String(p.grade || ''), String(p.budget || ''), String(p.schedule || ''), String(p.description || ''), String(p.teacherName || '')]
+      )
+      requestId = Number(result.insertId || 0)
+    } catch (error) {
+      if (!isOptionalSchemaError(error)) throw error
       const [result] = await pool.query(
         `INSERT INTO requests (parent_id, title, subject, grade, budget, schedule, status, teacher_name)
          VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
         [req.user.id, title, String(p.subject || ''), String(p.grade || ''), String(p.budget || ''), String(p.schedule || ''), String(p.teacherName || '')]
       )
-      return ok(res, { id: result.insertId })
+      requestId = Number(result.insertId || 0)
     }
+
+    // Create a request first, then try immediate matching so parent/teacher pages stay in sync.
+    let matchedCount = 0
+    let teacherName = ''
+    try {
+      const matchResult = await runMatchingForRequests([requestId])
+      matchedCount = Number(matchResult?.generated || 0)
+      if (matchedCount > 0) {
+        const [topMatchRows] = await pool.query(
+          `SELECT u.nickname
+             FROM matches m
+             JOIN users u ON u.id = m.teacher_id
+            WHERE m.request_id = ?
+            ORDER BY m.match_score DESC, m.matched_at DESC
+            LIMIT 1`,
+          [requestId]
+        )
+        teacherName = String(topMatchRows[0]?.nickname || '')
+        await pool.query('UPDATE requests SET status = ?, teacher_name = ? WHERE id = ? AND parent_id = ?', ['matching', teacherName, requestId, req.user.id])
+      }
+    } catch (matchError) {
+      console.error('[matching] immediate run failed after parent request create:', matchError?.message || matchError)
+    }
+
+    ok(res, {
+      id: requestId,
+      status: matchedCount > 0 ? 'matching' : 'pending',
+      teacherName: teacherName || '',
+      matchedCount
+    })
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.put('/api/parent/requests/:id', authRequired('parent'), async (req, res) => {
+  const id = Number(req.params.id)
+  if (!Number.isInteger(id) || id <= 0) return fail(res, 400, 'Invalid request id')
+  const p = req.body || {}
+  const title = String(p.title || '').trim()
+  if (!title) return fail(res, 400, 'title is required')
+  const [rows] = await pool.query('SELECT id FROM requests WHERE id = ? AND parent_id = ? LIMIT 1', [id, req.user.id])
+  if (!rows.length) return fail(res, 404, 'Request not found')
+  try {
+    try {
+      await pool.query(
+        `UPDATE requests
+            SET title = ?, subject = ?, grade = ?, budget = ?, schedule = ?, description = ?, teacher_name = '', status = 'pending', updated_at = NOW()
+          WHERE id = ? AND parent_id = ?`,
+        [title, String(p.subject || ''), String(p.grade || ''), String(p.budget || ''), String(p.schedule || ''), String(p.description || ''), id, req.user.id]
+      )
+    } catch (error) {
+      if (!isOptionalSchemaError(error)) throw error
+      await pool.query(
+        `UPDATE requests
+            SET title = ?, subject = ?, grade = ?, budget = ?, schedule = ?, teacher_name = '', status = 'pending'
+          WHERE id = ? AND parent_id = ?`,
+        [title, String(p.subject || ''), String(p.grade || ''), String(p.budget || ''), String(p.schedule || ''), id, req.user.id]
+      )
+    }
+
+    // Request content changed, remove previous candidates and rerun matching.
+    await pool.query('DELETE FROM matches WHERE request_id = ? AND parent_id = ?', [id, req.user.id])
+
+    let matchedCount = 0
+    let teacherName = ''
+    try {
+      const matchResult = await runMatchingForRequests([id])
+      matchedCount = Number(matchResult?.generated || 0)
+      if (matchedCount > 0) {
+        const [topMatchRows] = await pool.query(
+          `SELECT u.nickname
+             FROM matches m
+             JOIN users u ON u.id = m.teacher_id
+            WHERE m.request_id = ?
+            ORDER BY m.match_score DESC, m.matched_at DESC
+            LIMIT 1`,
+          [id]
+        )
+        teacherName = String(topMatchRows[0]?.nickname || '')
+      }
+    } catch (matchError) {
+      console.error('[matching] rerun failed after parent request update:', matchError?.message || matchError)
+    }
+
+    await pool.query('UPDATE requests SET status = ?, teacher_name = ? WHERE id = ? AND parent_id = ?', [matchedCount > 0 ? 'matching' : 'pending', teacherName, id, req.user.id])
+    ok(res, { id, status: matchedCount > 0 ? 'matching' : 'pending', teacherName: teacherName || '', matchedCount })
+  } catch (error) {
     fail(res, 500, error.message)
   }
 })
@@ -978,7 +1232,7 @@ app.get('/api/parent/notifications', authRequired('parent'), async (req, res) =>
     const notifications = matchRows.map((row) => {
       let content = `老师 ${row.teacher_name} 与你的需求「${row.title}」已进入匹配池。`
       if (row.status === 'unlocked') content = `老师 ${row.teacher_name} 已解锁联系方式，请及时沟通。`
-      if (row.unlock_granted) content = `双方已接受，老师 ${row.teacher_name} 可解锁联系方式。`
+      if (row.unlock_granted) content = `\u53cc\u65b9\u90fd\u5df2\u63a5\u53d7\uff0c\u5df2\u81ea\u52a8\u5f00\u653e\u4e0e\u8001\u5e08 ${row.teacher_name} \u7684\u8054\u7cfb\u65b9\u5f0f\u3002`
       if (row.teacher_accept_status === 'accepted') content = `老师 ${row.teacher_name} 已接受你的需求，可继续推进沟通。`
       if (row.teacher_accept_status === 'rejected') content = `老师 ${row.teacher_name} 暂不接受该需求，建议重新筛选。`
       return {
@@ -1186,6 +1440,16 @@ app.get('/api/teacher/analytics', authRequired('teacher'), async (req, res) => {
 })
 
 const mapMatchItem = (row) => ({
+  decisionMessage:
+    String(row.teacher_accept_status || '') === 'rejected'
+      ? '老师已拒绝该需求，联系方式不会解锁。'
+      : String(row.parent_accept_status || '') === 'rejected'
+        ? '家长已拒绝该需求，联系方式不会解锁。'
+        : !!row.unlock_granted
+          ? '双方已接受，联系方式已自动解锁。'
+          : String(row.teacher_accept_status || '') === 'accepted' || String(row.parent_accept_status || '') === 'accepted'
+            ? '已单方接受，待双方确认后自动解锁联系方式。'
+            : '请先选择接受或拒绝，双方接受后会自动解锁联系方式。',
   id: Number(row.id),
   parentId: Number(row.parent_id),
   requestId: Number(row.request_id),
@@ -1202,6 +1466,15 @@ const mapMatchItem = (row) => ({
   parentAcceptStatus: String(row.parent_accept_status || 'pending'),
   teacherAcceptStatus: String(row.teacher_accept_status || 'pending'),
   unlockGranted: !!row.unlock_granted,
+  parentPhone: row.unlock_granted ? String(row.parent_phone || '') : '',
+  parentWechat: row.unlock_granted ? String(row.parent_wechat || '') : '',
+  teacherPhone: row.unlock_granted ? String(row.teacher_phone || '') : '',
+  teacherWechat: row.unlock_granted ? String(row.teacher_wechat || '') : '',
+  teacherCity: String(row.teacher_city || row.user_city || ''),
+  teacherIntro: String(row.teacher_intro || row.teacher_bio || ''),
+  teacherSubjects: parseArrayField(row.teacher_subjects || ''),
+  teacherGrades: parseArrayField(row.teacher_grades || ''),
+  teacherExperienceYears: Number(row.teacher_experience_years || 0),
   rematchCount: Number(row.rematch_count || 0),
   degradeLevel: Number(row.degrade_level || 0),
   matchTips: parseArrayField(row.match_tips),
@@ -1236,10 +1509,12 @@ const getParentMatchById = async (parentId, matchId) => {
 const grantUnlockIfBothAccepted = async (matchId) => {
   const [rows] = await pool.query('SELECT parent_accept_status, teacher_accept_status, unlock_granted FROM matches WHERE id = ? LIMIT 1', [matchId])
   const match = rows[0]
-  if (!match) return
+  if (!match) return { exists: false, unlockGranted: false, justGranted: false }
   if (!match.unlock_granted && match.parent_accept_status === 'accepted' && match.teacher_accept_status === 'accepted') {
     await pool.query("UPDATE matches SET unlock_granted = 1, status = 'accepted' WHERE id = ?", [matchId])
+    return { exists: true, unlockGranted: true, justGranted: true }
   }
+  return { exists: true, unlockGranted: !!match.unlock_granted, justGranted: false }
 }
 
 app.get('/api/teacher/matches', authRequired('teacher'), async (req, res) => {
@@ -1255,7 +1530,7 @@ app.get('/api/teacher/matches', authRequired('teacher'), async (req, res) => {
 
     const [rows] = await pool.query(
       `SELECT m.*, r.title, r.subject, r.grade, r.budget, r.schedule, r.status AS request_status,
-              u.nickname AS parent_name, u.city AS parent_city
+              u.nickname AS parent_name, u.city AS parent_city, u.phone AS parent_phone, u.wechat AS parent_wechat
          FROM matches m
          JOIN requests r ON r.id = m.request_id
          JOIN users u ON u.id = m.parent_id
@@ -1299,7 +1574,7 @@ app.post('/api/teacher/matches/:id/unlock', authRequired('teacher'), async (req,
     }
     if (!match.unlock_granted) {
       await conn.rollback()
-      return fail(res, 403, '需双方接受后才可解锁')
+      return fail(res, 403, '\u9700\u53cc\u65b9\u90fd\u63a5\u53d7\u9700\u6c42\u540e\u624d\u4f1a\u81ea\u52a8\u5f00\u653e\u8054\u7cfb\u65b9\u5f0f\u3002')
     }
     const [memberRows] = await conn.query('SELECT * FROM memberships WHERE user_id = ? LIMIT 1 FOR UPDATE', [req.user.id])
     if (!memberRows.length) {
@@ -1343,8 +1618,13 @@ app.post('/api/teacher/matches/:id/accept', authRequired('teacher'), async (req,
     [id, req.user.id]
   )
   if (!result.affectedRows) return fail(res, 404, 'Match not found')
-  await grantUnlockIfBothAccepted(id)
-  ok(res, { id, accepted: true })
+  const unlockState = await grantUnlockIfBothAccepted(id)
+  ok(res, {
+    id,
+    accepted: true,
+    unlockGranted: unlockState.unlockGranted,
+    message: unlockState.unlockGranted ? '双方已接受，联系方式已自动解锁。' : '已接受需求，等待家长确认后自动解锁联系方式。'
+  })
 })
 
 app.post('/api/teacher/matches/:id/reject', authRequired('teacher'), async (req, res) => {
@@ -1354,7 +1634,7 @@ app.post('/api/teacher/matches/:id/reject', authRequired('teacher'), async (req,
     [id, req.user.id]
   )
   if (!result.affectedRows) return fail(res, 404, 'Match not found')
-  ok(res, { id, rejected: true })
+  ok(res, { id, rejected: true, unlockGranted: false, message: '你已拒绝该需求，联系方式不会解锁。' })
 })
 
 app.post('/api/teacher/matches/:id/feedback', authRequired('teacher'), async (req, res) => {
@@ -1450,23 +1730,47 @@ app.get('/api/teacher/dashboard/summary', authRequired('teacher'), async (req, r
 
 app.get('/api/parent/matches', authRequired('parent'), async (req, res) => {
   const status = String(req.query?.status || '').trim()
-  const [rows] = await pool.query(
-    `SELECT m.*, r.title, r.subject, r.grade, r.budget, r.schedule, r.status AS request_status, u.nickname AS teacher_name
-       FROM matches m
-       JOIN requests r ON r.id = m.request_id
-       JOIN users u ON u.id = m.teacher_id
-      WHERE m.parent_id = ?
-      ORDER BY m.matched_at DESC, m.match_score DESC`,
-    [req.user.id]
-  )
-  const filtered = status ? rows.filter((row) => row.status === status) : rows
-  ok(
-    res,
-    filtered.map((row) => ({
-      ...mapMatchItem({ ...row, parent_name: '' }),
-      teacherName: String(row.teacher_name || '老师')
-    }))
-  )
+  try {
+    let rows = []
+    try {
+      const [joinedRows] = await pool.query(
+        `SELECT m.*, r.title, r.subject, r.grade, r.budget, r.schedule, r.status AS request_status,
+                u.nickname AS teacher_name, u.phone AS teacher_phone, u.wechat AS teacher_wechat, u.city AS user_city, u.bio AS teacher_bio,
+                tp.city AS teacher_city, tp.intro AS teacher_intro, tp.subjects AS teacher_subjects, tp.grades AS teacher_grades, tp.experience_years AS teacher_experience_years
+           FROM matches m
+           JOIN requests r ON r.id = m.request_id
+           JOIN users u ON u.id = m.teacher_id
+           LEFT JOIN teacher_profiles tp ON tp.user_id = m.teacher_id
+          WHERE m.parent_id = ?
+          ORDER BY m.matched_at DESC, m.match_score DESC`,
+        [req.user.id]
+      )
+      rows = joinedRows
+    } catch (error) {
+      if (!isOptionalSchemaError(error)) throw error
+      const [basicRows] = await pool.query(
+        `SELECT m.*, r.title, r.subject, r.grade, r.budget, r.schedule, r.status AS request_status,
+                u.nickname AS teacher_name, u.phone AS teacher_phone, u.wechat AS teacher_wechat, u.city AS user_city, u.bio AS teacher_bio
+           FROM matches m
+           JOIN requests r ON r.id = m.request_id
+           JOIN users u ON u.id = m.teacher_id
+          WHERE m.parent_id = ?
+          ORDER BY m.matched_at DESC, m.match_score DESC`,
+        [req.user.id]
+      )
+      rows = basicRows
+    }
+    const filtered = status ? rows.filter((row) => row.status === status) : rows
+    ok(
+      res,
+      filtered.map((row) => ({
+        ...mapMatchItem({ ...row, parent_name: '' }),
+        teacherName: String(row.teacher_name || '老师')
+      }))
+    )
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
 })
 
 app.post('/api/parent/matches/:id/accept', authRequired('parent'), async (req, res) => {
@@ -1476,8 +1780,13 @@ app.post('/api/parent/matches/:id/accept', authRequired('parent'), async (req, r
     [id, req.user.id]
   )
   if (!result.affectedRows) return fail(res, 404, 'Match not found')
-  await grantUnlockIfBothAccepted(id)
-  ok(res, { id, accepted: true })
+  const unlockState = await grantUnlockIfBothAccepted(id)
+  ok(res, {
+    id,
+    accepted: true,
+    unlockGranted: unlockState.unlockGranted,
+    message: unlockState.unlockGranted ? '双方已接受，联系方式已自动解锁。' : '已接受需求，等待老师确认后自动解锁联系方式。'
+  })
 })
 
 app.post('/api/parent/matches/:id/reject', authRequired('parent'), async (req, res) => {
@@ -1487,7 +1796,7 @@ app.post('/api/parent/matches/:id/reject', authRequired('parent'), async (req, r
     [id, req.user.id]
   )
   if (!result.affectedRows) return fail(res, 404, 'Match not found')
-  ok(res, { id, rejected: true })
+  ok(res, { id, rejected: true, unlockGranted: false, message: '你已拒绝该需求，联系方式不会解锁。' })
 })
 
 app.post('/api/parent/matches/:id/feedback', authRequired('parent'), async (req, res) => {
@@ -1732,7 +2041,7 @@ app.get('/api/teacher/notifications', authRequired('teacher'), async (req, res) 
           row.status === 'unlocked'
             ? '已解锁联系方式，可立即发起沟通。'
             : row.unlock_granted
-              ? '双方已接受，可进行联系方式解锁。'
+              ? '\u53cc\u65b9\u5df2\u63a5\u53d7\uff0c\u8054\u7cfb\u65b9\u5f0f\u5df2\u81ea\u52a8\u89e3\u9501\uff0c\u53ef\u76f4\u63a5\u6c9f\u901a\u3002'
               : row.teacher_accept_status === 'accepted'
                 ? '你已接受该需求，等待家长确认。'
                 : row.parent_accept_status === 'accepted'
@@ -1903,17 +2212,32 @@ const discoverDTO = (row) => {
 }
 
 const loadDiscoverList = async () => {
-  const [rows] = await pool.query(
-    `SELECT u.id, u.nickname, u.avatar, u.city AS user_city, u.bio, u.preferred_subjects, u.preferred_grade,
-            tp.user_id, tp.real_name, tp.gender, tp.city, tp.district, tp.subjects, tp.grades, tp.experience_years,
-            tp.intro, tp.verified, tp.hourly_price_min, tp.hourly_price_max, tp.teaching_mode, tp.available_time_text,
-            tp.rating_avg, tp.rating_count, tp.is_active, tp.updated_at, m.plan_name
-       FROM users u
-       LEFT JOIN teacher_profiles tp ON tp.user_id = u.id
-       LEFT JOIN memberships m ON m.user_id = u.id
-      WHERE u.role='teacher'`
-  )
-  return rows.map(discoverDTO).filter((t) => t.isActive !== false)
+  try {
+    const [rows] = await pool.query(
+      `SELECT u.id, u.nickname, u.avatar, u.city AS user_city, u.bio, u.preferred_subjects, u.preferred_grade,
+              tp.user_id, tp.real_name, tp.gender, tp.city, tp.district, tp.subjects, tp.grades, tp.experience_years,
+              tp.intro, tp.verified, tp.hourly_price_min, tp.hourly_price_max, tp.teaching_mode, tp.available_time_text,
+              tp.rating_avg, tp.rating_count, tp.is_active, tp.updated_at, m.plan_name
+         FROM users u
+         LEFT JOIN teacher_profiles tp ON tp.user_id = u.id
+         LEFT JOIN memberships m ON m.user_id = u.id
+        WHERE u.role='teacher'`
+    )
+    return rows.map(discoverDTO).filter((t) => t.isActive !== false)
+  } catch (error) {
+    if (!isOptionalSchemaError(error)) throw error
+    const [rows] = await pool.query(
+      `SELECT u.id, u.nickname, u.avatar, u.city AS user_city, u.bio, u.preferred_subjects, u.preferred_grade,
+              NULL AS user_id, NULL AS real_name, NULL AS gender, NULL AS city, NULL AS district, NULL AS subjects, NULL AS grades,
+              NULL AS experience_years, NULL AS intro, NULL AS verified, NULL AS hourly_price_min, NULL AS hourly_price_max,
+              NULL AS teaching_mode, NULL AS available_time_text, NULL AS rating_avg, NULL AS rating_count, 1 AS is_active,
+              u.updated_at, m.plan_name
+         FROM users u
+         LEFT JOIN memberships m ON m.user_id = u.id
+        WHERE u.role='teacher'`
+    )
+    return rows.map(discoverDTO).filter((t) => t.isActive !== false)
+  }
 }
 
 app.get('/api/discover/teachers', async (req, res) => {
@@ -2058,14 +2382,25 @@ app.post('/api/discover/teachers/:teacherId/contact', authRequired('parent'), as
 app.get('/api/messages/conversations', authRequired(), async (req, res) => {
   const [rows] = await pool.query(
     `SELECT c.id, c.last_message, c.updated_at,
-            u.id AS contact_id, u.nickname AS contact_name, u.role AS contact_role
+            u.id AS contact_id, u.nickname AS contact_name, u.role AS contact_role, u.avatar AS contact_avatar
        FROM conversations c
        JOIN users u ON (c.parent_id = u.id OR c.teacher_id = u.id)
       WHERE (c.parent_id = ? OR c.teacher_id = ?) AND u.id != ?
       ORDER BY c.updated_at DESC`,
     [req.user.id, req.user.id, req.user.id]
   )
-  ok(res, rows.map((r) => ({ id: Number(r.id), contactId: Number(r.contact_id), contactName: r.contact_name, contactRole: r.contact_role, lastMessage: r.last_message || '', updatedAt: toISO(r.updated_at) })))
+  ok(
+    res,
+    rows.map((r) => ({
+      id: Number(r.id),
+      contactId: Number(r.contact_id),
+      contactName: r.contact_name,
+      contactRole: r.contact_role,
+      contactAvatar: String(r.contact_avatar || ''),
+      lastMessage: r.last_message || '',
+      updatedAt: toISO(r.updated_at)
+    }))
+  )
 })
 
 app.get('/api/messages/unread-count', authRequired(), async (req, res) => {
@@ -2084,15 +2419,27 @@ app.get('/api/messages/unread-count', authRequired(), async (req, res) => {
 app.get('/api/messages/:conversationId', authRequired(), async (req, res) => {
   const conversationId = Number(req.params.conversationId)
   const [rows] = await pool.query(
-    `SELECT m.*
+    `SELECT m.*, u.avatar AS sender_avatar
        FROM messages m
        JOIN conversations c ON c.id = m.conversation_id
+       JOIN users u ON u.id = m.sender_id
       WHERE m.conversation_id = ?
         AND (c.parent_id = ? OR c.teacher_id = ?)
       ORDER BY m.created_at ASC`,
     [conversationId, req.user.id, req.user.id]
   )
-  ok(res, rows.map((m) => ({ id: Number(m.id), conversationId: Number(m.conversation_id), senderId: Number(m.sender_id), content: m.content, isRead: !!m.is_read, createdAt: toISO(m.created_at) })))
+  ok(
+    res,
+    rows.map((m) => ({
+      id: Number(m.id),
+      conversationId: Number(m.conversation_id),
+      senderId: Number(m.sender_id),
+      senderAvatar: String(m.sender_avatar || ''),
+      content: m.content,
+      isRead: !!m.is_read,
+      createdAt: toISO(m.created_at)
+    }))
+  )
 })
 
 app.post('/api/messages/:conversationId/read', authRequired(), async (req, res) => {
@@ -2141,9 +2488,23 @@ io.on('connection', (socket) => {
       const [result] = await conn.query('INSERT INTO messages (conversation_id, sender_id, content) VALUES (?, ?, ?)', [conversationId, userId, content])
       await conn.query('UPDATE conversations SET last_message = ?, updated_at = NOW() WHERE id = ?', [content, conversationId])
       await conn.commit()
-      const [savedRows] = await pool.query('SELECT * FROM messages WHERE id = ?', [result.insertId])
+      const [savedRows] = await pool.query(
+        `SELECT m.*, u.avatar AS sender_avatar
+           FROM messages m
+           JOIN users u ON u.id = m.sender_id
+          WHERE m.id = ?`,
+        [result.insertId]
+      )
       const saved = savedRows[0]
-      const payload = { id: Number(saved.id), conversationId: Number(saved.conversation_id), senderId: Number(saved.sender_id), content: saved.content, isRead: !!saved.is_read, createdAt: toISO(saved.created_at) }
+      const payload = {
+        id: Number(saved.id),
+        conversationId: Number(saved.conversation_id),
+        senderId: Number(saved.sender_id),
+        senderAvatar: String(saved.sender_avatar || ''),
+        content: saved.content,
+        isRead: !!saved.is_read,
+        createdAt: toISO(saved.created_at)
+      }
       io.to(`user_${receiverId}`).emit('receive_message', payload)
       socket.emit('message_sent', payload)
     } catch (error) {

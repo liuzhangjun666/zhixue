@@ -8,6 +8,7 @@
     "api:dev": "node server/src/index.js",
     "api:migrate:compat": "node server/src/migrate-compat.js",
     "api:migrate:discover": "node server/src/migrate-discover.js",
+    "seed:matching": "node server/scripts/seed-matching-data.js",
     "smoke:auth": "node server/scripts/smoke-auth.js",
     "smoke:core": "node server/scripts/smoke-core.js",
     "build": "vite build",

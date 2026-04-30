@@ -6,7 +6,6 @@ import { teacherApi, type MatchStatus, type TeacherMatchDTO } from '../../api/te
 const loading = ref(false)
 const actioningId = ref<number | null>(null)
 const feedback = ref('')
-const unlockedMap = reactive<Record<number, { phone: string; wechat: string; parentName: string }>>({})
 const matches = ref<TeacherMatchDTO[]>([])
 const tab = ref<'' | MatchStatus>('')
 
@@ -72,6 +71,36 @@ const filtered = computed(() => {
   return matches.value.filter((item) => item.status === tab.value)
 })
 
+const unlockStats = computed(() => {
+  const source = filtered.value
+  return {
+    total: source.length,
+    parentAccepted: source.filter((item) => item.parentAcceptStatus === 'accepted').length,
+    teacherAccepted: source.filter((item) => item.teacherAcceptStatus === 'accepted').length,
+    unlocked: source.filter((item) => item.unlockGranted).length
+  }
+})
+
+const pendingUnlockFromParents = computed(() => {
+  return filtered.value.filter((item) => item.parentAcceptStatus === 'accepted' && item.teacherAcceptStatus === 'pending')
+})
+
+const hasTeacherAccepted = (item: TeacherMatchDTO) => item.teacherAcceptStatus === 'accepted'
+const isRejected = (item: TeacherMatchDTO) => item.status === 'rejected'
+const canAccept = (item: TeacherMatchDTO) => !hasTeacherAccepted(item) && !isRejected(item)
+const canReject = (item: TeacherMatchDTO) => !hasTeacherAccepted(item) && !isRejected(item)
+const canRematch = (item: TeacherMatchDTO) => !hasTeacherAccepted(item) && !isRejected(item)
+
+const resolveDecisionMessage = (item: TeacherMatchDTO) => {
+  if (item.decisionMessage) return item.decisionMessage
+  if (item.teacherAcceptStatus === 'rejected') return '你已拒绝该需求，联系方式不会解锁。'
+  if (item.parentAcceptStatus === 'rejected') return '家长已拒绝该需求，联系方式不会解锁。'
+  if (item.unlockGranted) return '双方已接受，联系方式已自动解锁。'
+  if (item.teacherAcceptStatus === 'accepted') return '你已接受需求，等待家长确认后自动解锁联系方式。'
+  if (item.parentAcceptStatus === 'accepted') return '家长已接受，等待你确认后自动解锁联系方式。'
+  return '请先选择接受或拒绝，双方接受后会自动解锁联系方式。'
+}
+
 const selectedCityName = computed(() => cityOptions.value.find((item) => item.code === filter.cityCode)?.name || '')
 const selectedDistrictName = computed(() => districtOptions.value.find((item) => item.code === filter.districtCode)?.name || '')
 
@@ -95,25 +124,12 @@ const load = async () => {
   }
 }
 
-const unlock = async (id: number, unlockType: 'phone' | 'wechat') => {
-  actioningId.value = id
-  feedback.value = ''
-  try {
-    const data = await teacherApi.unlockMatch(id, unlockType)
-    unlockedMap[id] = { phone: data.phone, wechat: data.wechat, parentName: data.parentName }
-    await load()
-  } catch (error) {
-    feedback.value = (error as Error).message || '解锁失败'
-  } finally {
-    actioningId.value = null
-  }
-}
-
 const accept = async (id: number) => {
   actioningId.value = id
   feedback.value = ''
   try {
-    await teacherApi.acceptMatch(id)
+    const result = await teacherApi.acceptMatch(id)
+    feedback.value = result?.message || ''
     await load()
   } catch (error) {
     feedback.value = (error as Error).message || '接受失败'
@@ -126,7 +142,8 @@ const reject = async (id: number) => {
   actioningId.value = id
   feedback.value = ''
   try {
-    await teacherApi.rejectMatch(id)
+    const result = await teacherApi.rejectMatch(id)
+    feedback.value = result?.message || ''
     await load()
   } catch (error) {
     feedback.value = (error as Error).message || '拒绝失败'
@@ -177,7 +194,7 @@ onMounted(load)
     <header class="card header">
       <div>
         <h1>匹配池</h1>
-        <p>查看系统推荐需求，按科目/年级/地区/预算筛选后解锁联系方式。</p>
+        <p>查看系统推荐需求。先接受或拒绝，双方接受后联系方式会自动解锁。</p>
       </div>
     </header>
 
@@ -232,8 +249,24 @@ onMounted(load)
     <article class="card tabs" v-if="!loading">
       <button :class="{ active: tab === '' }" @click="tab = ''; load()">全部</button>
       <button :class="{ active: tab === 'new' }" @click="tab = 'new'; load()">新推荐</button>
-      <button :class="{ active: tab === 'unlocked' }" @click="tab = 'unlocked'; load()">已解锁</button>
       <button :class="{ active: tab === 'accepted' }" @click="tab = 'accepted'; load()">已接受</button>
+      <button :class="{ active: tab === 'rejected' }" @click="tab = 'rejected'; load()">已拒绝</button>
+    </article>
+
+    <article class="card progress" v-if="!loading">
+      <span>家长已接受：{{ unlockStats.parentAccepted }}/{{ unlockStats.total }}</span>
+      <span>你已接受：{{ unlockStats.teacherAccepted }}/{{ unlockStats.total }}</span>
+      <span>已解锁联系方式/微信：{{ unlockStats.unlocked }}/{{ unlockStats.total }}</span>
+    </article>
+
+    <article class="card intent-list" v-if="!loading && pendingUnlockFromParents.length > 0">
+      <h3>这些家长想和你互换联系方式</h3>
+      <p>对方已接受，等待你确认后自动解锁手机号和微信号。</p>
+      <div class="intent-tags">
+        <span class="intent-tag" v-for="item in pendingUnlockFromParents" :key="`intent-${item.id}`">
+          {{ item.parentName }} · {{ item.title }}
+        </span>
+      </div>
     </article>
 
     <article class="card" v-if="loading">
@@ -260,28 +293,24 @@ onMounted(load)
         <div class="match-tips" v-if="Array.isArray(item.matchTips) && item.matchTips.length">
           <span class="tip" v-for="tip in item.matchTips" :key="`${item.id}-${tip}`">{{ tip }}</span>
         </div>
-        <p class="hint" v-if="!item.unlockGranted">需双方都点击“接受需求”后才可解锁联系方式</p>
+        <p class="hint" :class="{ rejected: item.status === 'rejected' }">{{ resolveDecisionMessage(item) }}</p>
 
-        <div class="contact" v-if="unlockedMap[item.id]">
+        <div class="contact" v-if="item.unlockGranted">
           <div>
-            手机号：{{ unlockedMap[item.id].phone }}
-            <button class="text-btn" @click="copyText(unlockedMap[item.id].phone, '手机号')">复制</button>
+            手机号：{{ item.parentPhone || '未提供' }}
+            <button class="text-btn" :disabled="!item.parentPhone" @click="copyText(item.parentPhone || '', '手机号')">复制</button>
           </div>
           <div>
-            微信号：{{ unlockedMap[item.id].wechat || '未提供' }}
-            <button class="text-btn" :disabled="!unlockedMap[item.id].wechat" @click="copyText(unlockedMap[item.id].wechat, '微信号')">复制</button>
-            <button class="text-btn" :disabled="!unlockedMap[item.id].wechat" @click="openWechat(unlockedMap[item.id].wechat)">打开微信</button>
+            微信号：{{ item.parentWechat || '未提供' }}
+            <button class="text-btn" :disabled="!item.parentWechat" @click="copyText(item.parentWechat || '', '微信号')">复制</button>
+            <button class="text-btn" :disabled="!item.parentWechat" @click="openWechat(item.parentWechat || '')">打开微信</button>
           </div>
         </div>
 
         <div class="actions">
-          <button class="btn" :disabled="actioningId === item.id" @click="unlock(item.id, 'phone')">
-            {{ actioningId === item.id ? '处理中...' : '解锁手机号' }}
-          </button>
-          <button class="btn-ghost" :disabled="actioningId === item.id" @click="unlock(item.id, 'wechat')">解锁微信</button>
-          <button class="btn-ghost" :disabled="actioningId === item.id" @click="accept(item.id)">接受需求</button>
-          <button class="btn-ghost" :disabled="actioningId === item.id" @click="feedbackRematch(item.id)">不满意重配</button>
-          <button class="btn-danger" :disabled="actioningId === item.id" @click="reject(item.id)">拒绝</button>
+          <button class="btn-ghost" v-if="canAccept(item)" :disabled="actioningId === item.id" @click="accept(item.id)">接受需求</button>
+          <button class="btn-ghost" v-if="canRematch(item)" :disabled="actioningId === item.id" @click="feedbackRematch(item.id)">不满意重配</button>
+          <button class="btn-danger" v-if="canReject(item)" :disabled="actioningId === item.id" @click="reject(item.id)">拒绝</button>
         </div>
       </article>
     </div>
@@ -306,6 +335,11 @@ onMounted(load)
 .tabs { display: flex; gap: 10px; }
 .tabs button { border: 1px solid #d1d5db; border-radius: 999px; background: #fff; padding: 8px 12px; cursor: pointer; }
 .tabs button.active { border-color: #10a881; color: #047857; background: rgba(16, 168, 129, 0.12); }
+.progress { display: flex; gap: 14px; flex-wrap: wrap; color: #0f172a; font-size: 14px; }
+.intent-list h3 { margin: 0 0 8px; color: #111827; font-size: 16px; }
+.intent-list p { margin: 0 0 10px; color: #6b7280; font-size: 13px; }
+.intent-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+.intent-tag { border-radius: 999px; background: #eef2ff; color: #4338ca; padding: 5px 10px; font-size: 12px; }
 .list { display: flex; flex-direction: column; gap: 12px; }
 .item h2 { margin: 0; font-size: 18px; color: #111827; }
 .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 12px; }
@@ -318,6 +352,7 @@ onMounted(load)
 .match-tips { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
 .tip { border-radius: 999px; padding: 4px 10px; font-size: 12px; background: #fff7ed; border: 1px solid #fdba74; color: #c2410c; }
 .hint { margin: 10px 0 0; color: #b45309; font-size: 13px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 8px 10px; }
+.hint.rejected { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
 .contact { margin-top: 10px; padding: 10px; border-radius: 10px; background: #f0fdf4; color: #065f46; display: flex; flex-direction: column; gap: 8px; }
 .text-btn { border: none; background: transparent; color: #0ea5e9; cursor: pointer; margin-left: 8px; }
 .actions { margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap; }

@@ -120,11 +120,24 @@ export interface TeacherMatchDTO {
   parentAcceptStatus?: 'pending' | 'accepted' | 'rejected'
   teacherAcceptStatus?: 'pending' | 'accepted' | 'rejected'
   unlockGranted?: boolean
+  decisionMessage?: string
+  parentPhone?: string
+  parentWechat?: string
+  teacherPhone?: string
+  teacherWechat?: string
   rematchCount?: number
   degradeLevel?: number
   matchTips?: string[]
   matchedAt: string
   unlockedAt: string | null
+}
+
+export interface MatchDecisionResultDTO {
+  id: number
+  accepted?: boolean
+  rejected?: boolean
+  unlockGranted?: boolean
+  message?: string
 }
 
 export interface UnlockResultDTO {
@@ -479,11 +492,13 @@ export const teacherApi = {
   },
 
   async acceptMatch(id: number) {
-    await teacherRequest(`${ENDPOINTS.matches}/${id}/accept`, { method: 'POST' })
+    const payload = await teacherRequest(`${ENDPOINTS.matches}/${id}/accept`, { method: 'POST' })
+    return unwrapData(payload, {} as MatchDecisionResultDTO)
   },
 
   async rejectMatch(id: number) {
-    await teacherRequest(`${ENDPOINTS.matches}/${id}/reject`, { method: 'POST' })
+    const payload = await teacherRequest(`${ENDPOINTS.matches}/${id}/reject`, { method: 'POST' })
+    return unwrapData(payload, {} as MatchDecisionResultDTO)
   },
 
   async feedbackMatch(id: number, reason: string) {

@@ -1,8 +1,8 @@
-<script setup>
+﻿<script setup>
 import { onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GlassCard from '../components/GlassCard.vue'
-import { parentRegister, parentSendCode, setAuthSession } from '../api/auth'
+import { parentRegister, parentSendCode, parentVerifyCode, setAuthSession } from '../api/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -20,6 +20,7 @@ const gender = ref('')
 const grade = ref('')
 const loading = ref(false)
 const sendingCode = ref(false)
+const verifyingStepOne = ref(false)
 const codeCountdown = ref(0)
 const devCodeHint = ref('')
 const errorText = ref('')
@@ -62,7 +63,7 @@ const sendCode = async () => {
   }
 }
 
-const nextStep = () => {
+const nextStep = async () => {
   if (currentStep.value === 1 && !agree.value) {
     alert('请先同意用户协议')
     return
@@ -74,6 +75,17 @@ const nextStep = () => {
   if (currentStep.value === 1 && !code.value.trim()) {
     errorText.value = '请输入验证码'
     return
+  }
+  if (currentStep.value === 1) {
+    verifyingStepOne.value = true
+    try {
+      await parentVerifyCode({ phone: phone.value.trim(), code: code.value.trim() })
+    } catch (error) {
+      errorText.value = (error && error.message) || '验证码错误或已过期'
+      return
+    } finally {
+      verifyingStepOne.value = false
+    }
   }
   errorText.value = ''
   if (currentStep.value < 3) {
@@ -176,8 +188,6 @@ onUnmounted(() => {
                 </button>
               </div>
             </div>
-            <div class="hint-text" v-if="devCodeHint">{{ devCodeHint }}</div>
-            
             <div class="input-group">
               <div class="input-wrapper">
                 <input type="password" v-model="password" class="input-field" placeholder="设置密码" required>
@@ -201,7 +211,7 @@ onUnmounted(() => {
               </label>
             </div>
             
-            <button type="submit" class="btn btn-primary w-100">下一步</button>
+            <button type="submit" class="btn btn-primary w-100" :disabled="verifyingStepOne">下一步</button>
           </form>
         </div>
         

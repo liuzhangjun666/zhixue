@@ -11,7 +11,18 @@
         "usedAt": 1777452999332,
         "industryId": "all"
       }
+    ],
+    "de06988ab9be45b7b42dc4f2744247dc": [
+      {
+        "expertId": "ComplianceAuditor",
+        "name": "合规规",
+        "profession": "合规审计师",
+        "avatarUrl": "https://acc-1258344699.cos.accelerate.myqcloud.com/workbuddy/experts/avatars/11-ProfessionalServices/ComplianceAuditor/ComplianceAuditor.png",
+        "promptUrl": "https://acc-1258344699.cos.accelerate.myqcloud.com/workbuddy/experts/experts/11-ProfessionalServices/ComplianceAuditor/ComplianceAuditor_zh.md",
+        "usedAt": 1777517948666,
+        "industryId": "all"
+      }
     ]
   },
-  "lastUpdated": 1777454904044
+  "lastUpdated": 1777517999850
 }

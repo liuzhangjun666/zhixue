@@ -1,9 +1,9 @@
-<script setup>
+﻿<script setup>
 import { onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import GlassCard from '../components/GlassCard.vue'
 import { teacherApi } from '../api/teacher'
-import { teacherLogin, teacherRegister, teacherSendCode, setAuthSession } from '../api/auth'
+import { teacherLogin, teacherRegister, teacherSendCode, teacherVerifyCode, setAuthSession } from '../api/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -30,6 +30,7 @@ const feedback = ref('')
 const errorText = ref('')
 const loading = ref(false)
 const sendingCode = ref(false)
+const verifyingStepOne = ref(false)
 const codeCountdown = ref(0)
 const devCodeHint = ref('')
 let codeTimer = null
@@ -122,6 +123,15 @@ const nextStep = async () => {
     if (password.value.length < 6) {
       errorText.value = '密码至少 6 位'
       return
+    }
+    verifyingStepOne.value = true
+    try {
+      await teacherVerifyCode({ phone: phone.value.trim(), code: code.value.trim() })
+    } catch (error) {
+      errorText.value = error?.message || '验证码错误或已过期'
+      return
+    } finally {
+      verifyingStepOne.value = false
     }
     errorText.value = ''
     currentStep.value = 2
@@ -291,15 +301,13 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <div class="hint-text" v-if="devCodeHint">{{ devCodeHint }}</div>
-
               <div class="input-group">
                 <div class="input-wrapper">
                   <input type="password" v-model="password" class="input-field" placeholder="设置密码（至少6位）" required>
                 </div>
               </div>
 
-              <button type="submit" class="btn btn-teacher w-100 mt-4">下一步</button>
+              <button type="submit" class="btn btn-teacher w-100 mt-4" :disabled="verifyingStepOne">下一步</button>
             </form>
           </div>
 
@@ -361,7 +369,7 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <button type="submit" class="btn btn-teacher w-100 mt-4">下一步</button>
+              <button type="submit" class="btn btn-teacher w-100 mt-4" :disabled="verifyingStepOne">下一步</button>
             </form>
           </div>
 

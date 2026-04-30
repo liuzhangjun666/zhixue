@@ -14,7 +14,8 @@
           @click="selectConversation(conv)"
         >
           <div class="avatar">
-            <UserIcon class="icon" />
+            <img v-if="conv.contactAvatar" :src="conv.contactAvatar" alt="avatar" />
+            <UserIcon v-else class="icon" />
           </div>
           <div class="conv-info">
             <div class="conv-header">
@@ -42,11 +43,17 @@
           <div
             v-for="msg in currentMessages"
             :key="msg.id"
-            class="message-bubble"
+            class="message-row"
             :class="{ mine: msg.senderId === currentUserId }"
           >
-            <div class="bubble-content">{{ msg.content }}</div>
-            <div class="bubble-time">{{ formatTime(msg.createdAt) }}</div>
+            <div class="bubble-avatar">
+              <img v-if="resolveMessageAvatar(msg)" :src="resolveMessageAvatar(msg)" alt="avatar" />
+              <UserIcon v-else class="icon" />
+            </div>
+            <div class="message-bubble">
+              <div class="bubble-content">{{ msg.content }}</div>
+              <div class="bubble-time">{{ formatTime(msg.createdAt) }}</div>
+            </div>
           </div>
         </div>
 
@@ -83,6 +90,7 @@ import { clearAuthSession, getCurrentUser, getStoredUser } from '../api/auth'
 const router = useRouter()
 const route = useRoute()
 const currentUserId = ref(Number(getStoredUser()?.id || 0))
+const currentUserAvatar = ref(String(getStoredUser()?.avatar || ''))
 
 const conversations = ref([])
 const currentConversation = ref(null)
@@ -98,6 +106,14 @@ const formatTime = (isoString) => {
   if (!isoString) return ''
   const date = new Date(isoString)
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+const resolveMessageAvatar = (msg) => {
+  if (!msg) return ''
+  if (Number(msg.senderId) === Number(currentUserId.value)) {
+    return String(msg.senderAvatar || currentUserAvatar.value || '')
+  }
+  return String(msg.senderAvatar || currentConversation.value?.contactAvatar || '')
 }
 
 const scrollToBottom = async () => {
@@ -160,6 +176,7 @@ onMounted(() => {
   getCurrentUser()
     .then((user) => {
       currentUserId.value = Number(user.id || 0)
+      currentUserAvatar.value = String(user.avatar || '')
     })
     .catch(() => {
       clearAuthSession()
@@ -281,6 +298,13 @@ onUnmounted(() => {
   color: #86868b;
 }
 
+.avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
 .conv-info {
   flex: 1;
   min-width: 0;
@@ -357,13 +381,42 @@ onUnmounted(() => {
   gap: 10px;
 }
 
-.message-bubble {
-  max-width: 70%;
-  align-self: flex-start;
+.message-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
 }
 
-.message-bubble.mine {
-  align-self: flex-end;
+.message-row.mine {
+  flex-direction: row-reverse;
+}
+
+.bubble-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #f5f5f7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #86868b;
+  flex-shrink: 0;
+}
+
+.bubble-avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.bubble-avatar .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.message-bubble {
+  max-width: 70%;
 }
 
 .bubble-content {
@@ -375,7 +428,7 @@ onUnmounted(() => {
   word-break: break-word;
 }
 
-.message-bubble.mine .bubble-content {
+.message-row.mine .bubble-content {
   background: #0071e3;
   color: #fff;
 }

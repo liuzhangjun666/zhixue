@@ -49,6 +49,11 @@ export const parentSendCode = async (phone: string) => {
   return unwrapData(res, { sent: false, ttlSeconds: 300, debugCode: '' as string | undefined })
 }
 
+export const parentVerifyCode = async (payload: { phone: string; code: string }) => {
+  const res = await request('/api/auth/parent/verify-code', { method: 'POST', body: payload })
+  return unwrapData(res, { verified: false })
+}
+
 export const parentRegister = async (payload: { phone: string; password: string; nickname: string; code: string }) => {
   const res = await request('/api/auth/parent/register', { method: 'POST', body: payload })
   return unwrapData(res, {} as AuthResponse)
@@ -62,6 +67,11 @@ export const teacherLogin = async (payload: { phone: string; password: string })
 export const teacherSendCode = async (phone: string) => {
   const res = await request('/api/teacher/auth/send-code', { method: 'POST', body: { phone } })
   return unwrapData(res, { sent: false, expireInSeconds: 300, debugCode: '' as string | undefined })
+}
+
+export const teacherVerifyCode = async (payload: { phone: string; code: string }) => {
+  const res = await request('/api/teacher/auth/verify-code', { method: 'POST', body: payload })
+  return unwrapData(res, { verified: false })
 }
 
 export const teacherRegister = async (payload: {
