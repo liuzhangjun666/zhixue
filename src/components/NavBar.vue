@@ -288,10 +288,9 @@ onUnmounted(() => {
 <style scoped>
 .navbar {
   height: 60px;
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid #E5E5EA;
+  background: #ffffff;
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   position: sticky;
   top: 0;
   z-index: 100;
@@ -322,20 +321,21 @@ onUnmounted(() => {
 .logo-icon {
   width: 32px;
   height: 32px;
-  background: #1D1D1F;
-  border-radius: 8px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
-  color: white;
+  font-size: 15px;
+  color: var(--color-primary-dark);
+  font-weight: 700;
 }
 
 .logo-text {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
-  color: #1D1D1F;
-  letter-spacing: -0.01em;
+  color: #0f172a;
 }
 
 .nav-menu {
@@ -344,20 +344,20 @@ onUnmounted(() => {
 }
 
 .nav-menu a {
-  font-size: 15px;
-  color: #86868B;
+  font-size: 14px;
+  color: #64748b;
   position: relative;
-  padding-bottom: 18px;
+  padding-bottom: 16px;
   transition: color 0.2s;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .nav-menu a:hover {
-  color: #1D1D1F;
+  color: #0f172a;
 }
 
 .nav-menu a.active {
-  color: #1D1D1F;
+  color: var(--color-primary-dark);
   font-weight: 600;
 }
 
@@ -368,7 +368,7 @@ onUnmounted(() => {
   left: 0;
   width: 100%;
   height: 2px;
-  background: #1D1D1F;
+  background: var(--color-primary);
   border-radius: 2px 2px 0 0;
 }
 
@@ -379,12 +379,12 @@ onUnmounted(() => {
 
 .nav-link {
   font-size: 14px;
-  color: #86868B;
+  color: #475569;
   transition: color 0.2s;
 }
 
 .nav-link:hover {
-  color: #1D1D1F;
+  color: var(--color-primary-dark);
 }
 
 .nav-link-with-badge {
@@ -397,7 +397,7 @@ onUnmounted(() => {
   position: absolute;
   top: -8px;
   right: -20px;
-  background-color: #ff3b30;
+  background-color: #dc2626;
   color: white;
   font-size: 11px;
   padding: 2px 5px;
@@ -407,7 +407,7 @@ onUnmounted(() => {
 }
 
 .divider {
-  color: #E5E5EA;
+  color: #cbd5e1;
   margin: 0 8px;
 }
 
@@ -421,7 +421,7 @@ onUnmounted(() => {
   background: none;
   border: none;
   cursor: pointer;
-  color: #86868B;
+  color: #64748b;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -430,7 +430,7 @@ onUnmounted(() => {
 }
 
 .icon-btn:hover {
-  color: #1D1D1F;
+  color: var(--color-primary-dark);
 }
 
 .notification-btn {
@@ -466,9 +466,9 @@ onUnmounted(() => {
   right: -20px;
   width: 300px;
   background: white;
-  border-radius: 16px;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.1);
-  border: 1px solid rgba(0,0,0,0.05);
+  border-radius: 12px;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+  border: 1px solid var(--color-border);
   margin-top: 16px;
   z-index: 200;
   overflow: hidden;
@@ -489,8 +489,8 @@ onUnmounted(() => {
 
 .dropdown-header {
   padding: 16px 20px;
-  border-bottom: 1px solid rgba(0,0,0,0.05);
-  background: #fbfbfd;
+  border-bottom: 1px solid var(--color-border);
+  background: #f8fafc;
 }
 
 .dropdown-header h4 {
@@ -507,7 +507,7 @@ onUnmounted(() => {
 
 .note-item {
   padding: 16px 20px;
-  border-bottom: 1px solid rgba(0,0,0,0.05);
+  border-bottom: 1px solid #f1f5f9;
   transition: background-color 0.2s;
 }
 
@@ -516,7 +516,7 @@ onUnmounted(() => {
 }
 
 .note-item:hover {
-  background-color: #f5f5f7;
+  background-color: #f8fafc;
 }
 
 .note-title {
@@ -546,19 +546,19 @@ onUnmounted(() => {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #F5F5F7;
-  border: 1px solid #E5E5EA;
+  background: #f8fafc;
+  border: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #86868B;
+  color: #64748b;
   transition: all 0.2s;
   cursor: pointer;
 }
 
 .avatar:hover {
-  border-color: #1D1D1F;
-  color: #1D1D1F;
+  border-color: var(--color-primary-light);
+  color: var(--color-primary-dark);
 }
 
 .avatar-icon {
@@ -572,9 +572,9 @@ onUnmounted(() => {
   right: 0;
   width: 160px;
   background: white;
-  border-radius: 12px;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.12);
-  border: 1px solid rgba(0,0,0,0.05);
+  border-radius: 10px;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.14);
+  border: 1px solid var(--color-border);
   margin-top: 12px;
   z-index: 200;
   overflow: hidden;
@@ -612,7 +612,7 @@ onUnmounted(() => {
 }
 
 .user-dropdown-item:hover {
-  background: #f5f5f7;
+  background: #f8fafc;
 }
 
 .user-dropdown-item.logout {

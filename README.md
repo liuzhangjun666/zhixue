@@ -34,6 +34,20 @@
 - `SMS_VERIFY_TEMPLATE`：验证码模板标识（默认 `VERIFY_CODE`）
 - `SMS_RENEW_TEMPLATE`：续费提醒模板标识（默认 `AUTO_RENEW_REMINDER`）
 - `SMS_TIMEOUT_MS`：短信请求超时毫秒数（默认 `5000`）
+- `CURRENT_POLICY_VERSION`：注册同意记录版本（默认 `2026-04-30`）
+- `MESSAGE_MAX_LENGTH`：单条消息最大长度（默认 `1000`）
+- `MESSAGE_RATE_LIMIT_WINDOW_MS` / `MESSAGE_RATE_LIMIT_MAX`：消息发送限流窗口与阈值
+- `MESSAGE_SENSITIVE_WORDS`：敏感词列表（逗号分隔）
+- `AUTH_SEND_CODE_WINDOW_MS` / `AUTH_SEND_CODE_MAX`：验证码接口限流窗口与阈值
+- `AUTH_LOGIN_WINDOW_MS` / `AUTH_LOGIN_MAX`：登录接口请求限流窗口与阈值
+- `AUTH_LOGIN_FAIL_WINDOW_MS` / `AUTH_LOGIN_FAIL_MAX`：登录失败惩罚窗口与阈值
+- `ADMIN_REVIEW_TOKEN`：审核后台接口访问令牌（通过 `x-admin-review-token` 请求头传递）
+- `RETENTION_JOB_ENABLED`：是否启用服务内定时留存任务（默认 `true`）
+- `RETENTION_JOB_INTERVAL_MS`：留存任务间隔毫秒（默认 `43200000`，即 12 小时）
+- `RETENTION_MESSAGE_ARCHIVE_AFTER_DAYS`：消息归档阈值天数（默认 `180`）
+- `RETENTION_MESSAGE_DELETE_AFTER_DAYS`：消息删除阈值天数（默认 `365`）
+- `RETENTION_AUDIT_LOG_RETENTION_DAYS`：审计日志保留天数（默认 `365`）
+- `RETENTION_COMPLAINT_RETENTION_DAYS`：已结案举报保留天数（默认 `730`）
 
 > 生产环境要求：必须显式配置 `AUTH_TOKEN_SECRET`，且不能使用开发默认值；否则后端会拒绝启动。
 
@@ -55,6 +69,12 @@ node server/src/init-db.js
 
 ```bash
 npm run api:migrate:compat
+```
+
+如需手动执行一次留存归档/清理任务：
+
+```bash
+npm run retention:run
 ```
 
 4. 启动后端
@@ -138,6 +158,12 @@ npm run build
 | GET | `/api/teacher/profile` | 老师资料 | 是（老师） |
 | GET | `/api/messages/conversations` | 会话列表 | 是 |
 | GET | `/api/messages/unread-count` | 未读数 | 是 |
+| POST | `/api/reports/messages/:messageId` | 提交消息举报 | 是 |
+| GET | `/api/reports/mine` | 我的举报记录 | 是 |
+| GET | `/api/admin/reports/review-queue` | 举报审核队列（需 `x-admin-review-token`） | 否（管理员令牌） |
+| PATCH | `/api/admin/reports/:id/review` | 审核处置举报（含禁言/封禁） | 否（管理员令牌） |
+| GET | `/api/admin/restrictions` | 查看用户限制记录 | 否（管理员令牌） |
+| POST | `/api/admin/restrictions/:id/release` | 解除限制 | 否（管理员令牌） |
 | GET | `/api/membership/status` | 当前会员状态 | 是 |
 | GET | `/api/membership/plans` | 会员套餐列表 | 否 |
 

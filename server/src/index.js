@@ -4,6 +4,7 @@ import { Server } from 'socket.io'
 import crypto from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import pool from './db.js'
+import { runRetentionJobs } from './retention.js'
 
 const app = express()
 const httpServer = createServer(app)
@@ -29,6 +30,28 @@ const SMS_SIGN_NAME = String(process.env.SMS_SIGN_NAME || '知学空间').trim()
 const SMS_VERIFY_TEMPLATE = String(process.env.SMS_VERIFY_TEMPLATE || 'VERIFY_CODE').trim()
 const SMS_RENEW_TEMPLATE = String(process.env.SMS_RENEW_TEMPLATE || 'AUTO_RENEW_REMINDER').trim()
 const SMS_TIMEOUT_MS = Math.max(1000, Number(process.env.SMS_TIMEOUT_MS || 5000))
+const CURRENT_POLICY_VERSION = String(process.env.CURRENT_POLICY_VERSION || '2026-04-30').trim()
+const MESSAGE_MAX_LENGTH = Math.max(1, Number(process.env.MESSAGE_MAX_LENGTH || 1000))
+const MESSAGE_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.MESSAGE_RATE_LIMIT_WINDOW_MS || 10 * 1000))
+const MESSAGE_RATE_LIMIT_MAX = Math.max(1, Number(process.env.MESSAGE_RATE_LIMIT_MAX || 10))
+const AUTH_SEND_CODE_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_SEND_CODE_WINDOW_MS || 10 * 60 * 1000))
+const AUTH_SEND_CODE_MAX = Math.max(1, Number(process.env.AUTH_SEND_CODE_MAX || 5))
+const AUTH_LOGIN_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_LOGIN_WINDOW_MS || 10 * 60 * 1000))
+const AUTH_LOGIN_MAX = Math.max(1, Number(process.env.AUTH_LOGIN_MAX || 10))
+const AUTH_LOGIN_FAIL_WINDOW_MS = Math.max(1000, Number(process.env.AUTH_LOGIN_FAIL_WINDOW_MS || 15 * 60 * 1000))
+const AUTH_LOGIN_FAIL_MAX = Math.max(1, Number(process.env.AUTH_LOGIN_FAIL_MAX || 5))
+const ADMIN_REVIEW_TOKEN = String(process.env.ADMIN_REVIEW_TOKEN || '').trim()
+const RETENTION_JOB_ENABLED = String(process.env.RETENTION_JOB_ENABLED || 'true').trim().toLowerCase() !== 'false'
+const RETENTION_JOB_INTERVAL_MS = Math.max(60 * 1000, Number(process.env.RETENTION_JOB_INTERVAL_MS || 12 * 60 * 60 * 1000))
+const MESSAGE_SENSITIVE_WORDS = String(process.env.MESSAGE_SENSITIVE_WORDS || '色情,赌博,诈骗,毒品,嫖娼,约炮')
+  .split(/[,\n]/)
+  .map((v) => v.trim())
+  .filter(Boolean)
+const ALLOWED_COMPLAINT_TYPES = new Set(['fake_info', 'harassment', 'service_issue', 'other'])
+const messageRateLimitStore = new Map()
+const authSendCodeLimitStore = new Map()
+const authLoginLimitStore = new Map()
+const authLoginFailureStore = new Map()
 
 if (process.env.NODE_ENV === 'production' && AUTH_TOKEN_SECRET === DEFAULT_AUTH_TOKEN_SECRET) {
   throw new Error('AUTH_TOKEN_SECRET must be set in production')
@@ -92,6 +115,8 @@ const parseObjectField = (value) => {
 
 const toDate = (value) => (value ? new Date(value).toISOString().slice(0, 10) : '')
 const toISO = (value) => (value ? new Date(value).toISOString() : '')
+const getClientIp = (req) => String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim()
+const getUserAgent = (req) => String(req.headers['user-agent'] || '').slice(0, 255)
 
 const getBearerToken = (req) => {
   const header = String(req.headers.authorization || '')
@@ -134,11 +159,50 @@ const verifyToken = (token) => {
 }
 
 const authRequired = (role = '') => (req, res, next) => {
-  const user = verifyToken(getBearerToken(req))
-  if (!user) return fail(res, 401, 'Unauthorized')
-  if (role && user.role !== role) return fail(res, 403, 'Forbidden')
-  req.user = user
+  ;(async () => {
+    const user = verifyToken(getBearerToken(req))
+    if (!user) return fail(res, 401, 'Unauthorized')
+    if (role && user.role !== role) return fail(res, 403, 'Forbidden')
+    const [settingRows] = await pool.query('SELECT deactivated FROM user_settings WHERE user_id = ? LIMIT 1', [user.id])
+    if (settingRows[0]?.deactivated) return fail(res, 403, 'Account deactivated')
+    const restrictions = await getActiveRestrictions(user.id)
+    if (restrictions.some((item) => item.restriction_type === 'ban')) return fail(res, 403, 'Account restricted')
+    req.user = user
+    next()
+  })().catch((error) => {
+    fail(res, 500, error.message)
+  })
+}
+
+const adminReviewRequired = () => (req, res, next) => {
+  const token = String(req.headers['x-admin-review-token'] || '').trim()
+  if (!ADMIN_REVIEW_TOKEN) return fail(res, 503, 'Admin review token not configured')
+  if (!token || token !== ADMIN_REVIEW_TOKEN) return fail(res, 401, 'Unauthorized')
+  req.adminId = 'review-admin'
   next()
+}
+
+const createAuditLog = async ({ actorType, actorId, action, targetType = '', targetId = '', details = {} }) => {
+  try {
+    await pool.query(
+      'INSERT INTO audit_logs (actor_type, actor_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?, ?)',
+      [String(actorType || 'system'), String(actorId || ''), String(action || ''), String(targetType || ''), String(targetId || ''), JSON.stringify(details || {})]
+    )
+  } catch (error) {
+    console.error('[audit] failed to write audit log:', error?.message || error)
+  }
+}
+
+const getActiveRestrictions = async (userId) => {
+  const [rows] = await pool.query(
+    `SELECT id, restriction_type, reason, start_at, end_at
+       FROM user_restrictions
+      WHERE user_id = ?
+        AND is_active = TRUE
+        AND (end_at IS NULL OR end_at > NOW())`,
+    [userId]
+  )
+  return rows
 }
 
 const getUserById = async (id) => {
@@ -176,6 +240,65 @@ const verifySmsCode = (role, phone, code) => {
   if (String(payload.code) !== String(code || '')) return false
   smsCodeStore.delete(key)
   return true
+}
+
+const isRateLimited = (store, key, windowMs, max) => {
+  const now = Date.now()
+  const windowStart = now - windowMs
+  const history = (store.get(key) || []).filter((ts) => ts > windowStart)
+  if (history.length >= max) {
+    store.set(key, history)
+    return true
+  }
+  history.push(now)
+  store.set(key, history)
+  return false
+}
+
+const incrementLoginFailure = (key) => {
+  const now = Date.now()
+  const windowStart = now - AUTH_LOGIN_FAIL_WINDOW_MS
+  const history = (authLoginFailureStore.get(key) || []).filter((ts) => ts > windowStart)
+  history.push(now)
+  authLoginFailureStore.set(key, history)
+  return history.length
+}
+
+const getLoginFailureCount = (key) => {
+  const now = Date.now()
+  const windowStart = now - AUTH_LOGIN_FAIL_WINDOW_MS
+  const history = (authLoginFailureStore.get(key) || []).filter((ts) => ts > windowStart)
+  authLoginFailureStore.set(key, history)
+  return history.length
+}
+
+const clearLoginFailure = (key) => {
+  authLoginFailureStore.delete(key)
+}
+
+const normalizeComplaintType = (type) => {
+  const value = String(type || 'other').trim()
+  return ALLOWED_COMPLAINT_TYPES.has(value) ? value : 'other'
+}
+
+const isMessageRateLimited = (userId) => {
+  const key = String(userId)
+  const now = Date.now()
+  const windowStart = now - MESSAGE_RATE_LIMIT_WINDOW_MS
+  const history = (messageRateLimitStore.get(key) || []).filter((ts) => ts > windowStart)
+  if (history.length >= MESSAGE_RATE_LIMIT_MAX) {
+    messageRateLimitStore.set(key, history)
+    return true
+  }
+  history.push(now)
+  messageRateLimitStore.set(key, history)
+  return false
+}
+
+const findSensitiveWords = (content) => {
+  const normalized = String(content || '').toLowerCase()
+  if (!normalized) return []
+  return MESSAGE_SENSITIVE_WORDS.filter((word) => normalized.includes(word.toLowerCase())).slice(0, 5)
 }
 
 const maskPhone = (phone) => {
@@ -265,6 +388,14 @@ const buildAuthPayload = (user) => {
     tokenExpiresIn: issued.tokenExpiresIn,
     tokenExpiresAt: issued.tokenExpiresAt
   }
+}
+
+const saveUserConsent = async (conn, { userId, role, phone, policyVersion, ip, userAgent }) => {
+  await conn.query(
+    `INSERT INTO user_consents (user_id, role, phone, policy_version, agreed_at, ip, user_agent)
+     VALUES (?, ?, ?, ?, NOW(), ?, ?)`,
+    [userId, role, phone, policyVersion || CURRENT_POLICY_VERSION, ip, userAgent]
+  )
 }
 
 const ensureTeacherProfile = async (user) => {
@@ -358,6 +489,63 @@ const ensureMatchingSchema = async () => {
   await ensureColumn('matches', 'match_tips', 'match_tips JSON')
   await ensureColumn('matches', 'last_feedback_at', 'last_feedback_at DATETIME DEFAULT NULL')
   await ensureColumn('matches', 'week_number', 'week_number INT NOT NULL DEFAULT 0')
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_consents (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      role ENUM('parent','teacher') NOT NULL,
+      phone VARCHAR(20) NOT NULL,
+      policy_version VARCHAR(40) NOT NULL,
+      agreed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      ip VARCHAR(64) NOT NULL DEFAULT '',
+      user_agent VARCHAR(255) NOT NULL DEFAULT '',
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_user_consents_user_time(user_id, agreed_at)
+    ) ENGINE=InnoDB
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_restrictions (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      restriction_type ENUM('mute','ban') NOT NULL,
+      reason VARCHAR(255) NOT NULL DEFAULT '',
+      source_complaint_id INT DEFAULT NULL,
+      start_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      end_at DATETIME DEFAULT NULL,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_user_restrictions_active(user_id, restriction_type, is_active, end_at)
+    ) ENGINE=InnoDB
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      actor_type ENUM('user','admin','system') NOT NULL,
+      actor_id VARCHAR(64) NOT NULL DEFAULT '',
+      action VARCHAR(100) NOT NULL,
+      target_type VARCHAR(50) NOT NULL DEFAULT '',
+      target_id VARCHAR(64) NOT NULL DEFAULT '',
+      details JSON,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_audit_logs_time(created_at),
+      INDEX idx_audit_logs_action(action)
+    ) ENGINE=InnoDB
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS message_archives (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      message_id INT NOT NULL UNIQUE,
+      conversation_id INT NOT NULL,
+      sender_id INT NOT NULL,
+      content TEXT NOT NULL,
+      is_read BOOLEAN DEFAULT FALSE,
+      created_at DATETIME NOT NULL,
+      archived_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      archive_reason VARCHAR(50) NOT NULL DEFAULT 'retention_policy',
+      INDEX idx_message_archives_time(created_at)
+    ) ENGINE=InnoDB
+  `)
 }
 
 const isOptionalSchemaError = (error) =>
@@ -604,6 +792,28 @@ const maybeRunRenewReminderJob = async () => {
   }
 }
 
+let runningRetentionJob = false
+const maybeRunRetentionJob = async () => {
+  if (!RETENTION_JOB_ENABLED || runningRetentionJob) return
+  runningRetentionJob = true
+  try {
+    const result = await runRetentionJobs(pool)
+    await createAuditLog({
+      actorType: 'system',
+      actorId: 'retention-job',
+      action: 'retention_job_ran',
+      targetType: 'retention',
+      targetId: '',
+      details: result
+    })
+    console.log('[retention] job done:', JSON.stringify(result))
+  } catch (error) {
+    console.error('[retention] job failed:', error?.message || error)
+  } finally {
+    runningRetentionJob = false
+  }
+}
+
 let lastWeeklyMatchKey = ''
 const maybeRunScheduledMatching = async () => {
   const now = new Date()
@@ -645,34 +855,83 @@ app.post('/api/auth/parent/register', async (req, res) => {
   const password = String(req.body?.password || '')
   const nickname = String(req.body?.nickname || '').trim()
   const code = String(req.body?.code || '').trim()
+  const inviteCode = String(req.body?.inviteCode || '').trim()
+  const agree = Boolean(req.body?.agree)
+  const policyVersion = String(req.body?.policyVersion || '').trim()
+  const ip = getClientIp(req)
+  const userAgent = getUserAgent(req)
   if (!phone || !password || !nickname) return fail(res, 400, 'phone, password and nickname are required')
   if (!code) return fail(res, 400, 'code is required')
+  if (!agree) return fail(res, 400, 'privacy agreement required')
+  if (!policyVersion) return fail(res, 400, 'policyVersion is required')
   if (!verifySmsCode('parent', phone, code)) return fail(res, 400, '验证码错误或已过期')
   if (password.length < 6) return fail(res, 400, 'password must be at least 6 chars')
+  const conn = await pool.getConnection()
   try {
-    const [exists] = await pool.query('SELECT id FROM users WHERE phone = ? LIMIT 1', [phone])
-    if (exists.length) return fail(res, 409, '手机号已注册')
+    await conn.beginTransaction()
+    const [exists] = await conn.query('SELECT id FROM users WHERE phone = ? LIMIT 1', [phone])
+    if (exists.length) {
+      await conn.rollback()
+      return fail(res, 409, '手机号已注册')
+    }
     const hash = await bcrypt.hash(password, 10)
-    const [result] = await pool.query(
+    const [result] = await conn.query(
       `INSERT INTO users (role, nickname, phone, password_hash, city, bio, preferred_grade, preferred_subjects)
        VALUES ('parent', ?, ?, ?, '', '', '', '[]')`,
       [nickname, phone, hash]
     )
-    await pool.query(
+    await conn.query(
       `INSERT INTO memberships (user_id, plan_name, expire_at, remaining_unlock, weekly_priority_quota, auto_renew)
        VALUES (?, '体验用户', NULL, 3, 0, FALSE)`,
       [result.insertId]
     )
+    await saveUserConsent(conn, { userId: result.insertId, role: 'parent', phone, policyVersion, ip, userAgent })
+
+    if (inviteCode) {
+      const [inviteRows] = await conn.query(
+        `SELECT id, inviter_id, invitee_id, status
+           FROM invite_records
+          WHERE invite_code = ? AND role = 'parent'
+          ORDER BY id DESC
+          LIMIT 1
+          FOR UPDATE`,
+        [inviteCode]
+      )
+      const invite = inviteRows[0]
+      if (invite && Number(invite.inviter_id || 0) !== Number(result.insertId) && !invite.invitee_id) {
+        await conn.query(
+          `UPDATE invite_records
+              SET invitee_id = ?, status = 'verified', reward_granted = 1, updated_at = NOW()
+            WHERE id = ?`,
+          [result.insertId, invite.id]
+        )
+        await conn.query(
+          `INSERT INTO memberships (user_id, plan_name, expire_at, remaining_unlock, weekly_priority_quota, auto_renew)
+           VALUES (?, '体验用户', NULL, 1, 0, FALSE)
+           ON DUPLICATE KEY UPDATE remaining_unlock = remaining_unlock + 1`,
+          [invite.inviter_id]
+        )
+      }
+    }
+
+    await conn.commit()
     const user = await getUserById(result.insertId)
     ok(res, buildAuthPayload(user), '注册成功')
   } catch (error) {
+    await conn.rollback()
     fail(res, 500, error.message)
+  } finally {
+    conn.release()
   }
 })
 
 app.post('/api/auth/parent/send-code', async (req, res) => {
   const phone = String(req.body?.phone || '').trim()
+  const ip = getClientIp(req)
   if (!phone) return fail(res, 400, 'phone is required')
+  if (isRateLimited(authSendCodeLimitStore, `parent|${ip}|${phone}`, AUTH_SEND_CODE_WINDOW_MS, AUTH_SEND_CODE_MAX)) {
+    return fail(res, 429, '发送过于频繁，请稍后再试')
+  }
   const debugCode = issueSmsCode('parent', phone)
   const smsResult = await sendVerificationSms('parent', phone, debugCode)
   if (!smsResult.sent) return fail(res, 500, '短信发送失败，请稍后重试')
@@ -686,10 +945,26 @@ app.post('/api/auth/parent/send-code', async (req, res) => {
 app.post('/api/auth/parent/login', async (req, res) => {
   const phone = String(req.body?.phone || '').trim()
   const password = String(req.body?.password || '')
+  const ip = getClientIp(req)
+  const rateKey = `parent|${ip}|${phone}`
   if (!phone || !password) return fail(res, 400, 'phone and password are required')
+  if (isRateLimited(authLoginLimitStore, rateKey, AUTH_LOGIN_WINDOW_MS, AUTH_LOGIN_MAX)) {
+    return fail(res, 429, '登录请求过于频繁，请稍后再试')
+  }
+  if (getLoginFailureCount(rateKey) >= AUTH_LOGIN_FAIL_MAX) {
+    return fail(res, 429, '登录失败次数过多，请稍后再试')
+  }
   try {
     const user = await getUserByPhone(phone, 'parent')
-    if (!user || !(await bcrypt.compare(password, user.password_hash || ''))) return fail(res, 401, 'Unauthorized')
+    if (!user || !(await bcrypt.compare(password, user.password_hash || ''))) {
+      incrementLoginFailure(rateKey)
+      return fail(res, 401, 'Unauthorized')
+    }
+    const [settingRows] = await pool.query('SELECT deactivated FROM user_settings WHERE user_id = ? LIMIT 1', [user.id])
+    if (settingRows[0]?.deactivated) return fail(res, 403, 'Account deactivated')
+    const restrictions = await getActiveRestrictions(user.id)
+    if (restrictions.some((item) => item.restriction_type === 'ban')) return fail(res, 403, 'Account restricted')
+    clearLoginFailure(rateKey)
     ok(res, buildAuthPayload(user), '登录成功')
   } catch (error) {
     fail(res, 500, error.message)
@@ -703,8 +978,14 @@ app.post('/api/auth/teacher/register', async (req, res) => {
   const subject = String(req.body?.subject || '').trim()
   const experience = String(req.body?.experience || '').trim()
   const code = String(req.body?.code || '').trim()
+  const agree = Boolean(req.body?.agree)
+  const policyVersion = String(req.body?.policyVersion || '').trim()
+  const ip = getClientIp(req)
+  const userAgent = getUserAgent(req)
   if (!phone || !password || !nickname) return fail(res, 400, 'phone, password and nickname are required')
   if (!code) return fail(res, 400, 'code is required')
+  if (!agree) return fail(res, 400, 'privacy agreement required')
+  if (!policyVersion) return fail(res, 400, 'policyVersion is required')
   if (!verifySmsCode('teacher', phone, code)) return fail(res, 400, '验证码错误或已过期')
   if (password.length < 6) return fail(res, 400, 'password must be at least 6 chars')
 
@@ -733,6 +1014,7 @@ app.post('/api/auth/teacher/register', async (req, res) => {
        VALUES (?, '普通老师', NULL, 0, 1, FALSE)`,
       [result.insertId]
     )
+    await saveUserConsent(conn, { userId: result.insertId, role: 'teacher', phone, policyVersion, ip, userAgent })
     await conn.commit()
     const user = await getUserById(result.insertId)
     ok(res, buildAuthPayload(user), '注册成功')
@@ -747,10 +1029,26 @@ app.post('/api/auth/teacher/register', async (req, res) => {
 app.post('/api/auth/teacher/login', async (req, res) => {
   const phone = String(req.body?.phone || '').trim()
   const password = String(req.body?.password || '')
+  const ip = getClientIp(req)
+  const rateKey = `teacher|${ip}|${phone}`
   if (!phone || !password) return fail(res, 400, 'phone and password are required')
+  if (isRateLimited(authLoginLimitStore, rateKey, AUTH_LOGIN_WINDOW_MS, AUTH_LOGIN_MAX)) {
+    return fail(res, 429, '登录请求过于频繁，请稍后再试')
+  }
+  if (getLoginFailureCount(rateKey) >= AUTH_LOGIN_FAIL_MAX) {
+    return fail(res, 429, '登录失败次数过多，请稍后再试')
+  }
   try {
     const user = await getUserByPhone(phone, 'teacher')
-    if (!user || !(await bcrypt.compare(password, user.password_hash || ''))) return fail(res, 401, 'Unauthorized')
+    if (!user || !(await bcrypt.compare(password, user.password_hash || ''))) {
+      incrementLoginFailure(rateKey)
+      return fail(res, 401, 'Unauthorized')
+    }
+    const [settingRows] = await pool.query('SELECT deactivated FROM user_settings WHERE user_id = ? LIMIT 1', [user.id])
+    if (settingRows[0]?.deactivated) return fail(res, 403, 'Account deactivated')
+    const restrictions = await getActiveRestrictions(user.id)
+    if (restrictions.some((item) => item.restriction_type === 'ban')) return fail(res, 403, 'Account restricted')
+    clearLoginFailure(rateKey)
     await ensureTeacherProfile(user)
     ok(res, buildAuthPayload(user), '登录成功')
   } catch (error) {
@@ -773,7 +1071,11 @@ app.post('/api/auth/logout', authRequired(), (_req, res) => ok(res, { success: t
 // Compatibility teacher auth
 app.post('/api/teacher/auth/send-code', async (req, res) => {
   const phone = String(req.body?.phone || '').trim()
+  const ip = getClientIp(req)
   if (!phone) return fail(res, 400, 'phone is required')
+  if (isRateLimited(authSendCodeLimitStore, `teacher|${ip}|${phone}`, AUTH_SEND_CODE_WINDOW_MS, AUTH_SEND_CODE_MAX)) {
+    return fail(res, 429, '发送过于频繁，请稍后再试')
+  }
   const debugCode = issueSmsCode('teacher', phone)
   const smsResult = await sendVerificationSms('teacher', phone, debugCode)
   if (!smsResult.sent) return fail(res, 500, '短信发送失败，请稍后重试')
@@ -997,6 +1299,51 @@ app.get('/api/parent/notifications', authRequired('parent'), async (req, res) =>
 
     ok(res, { matchUpdates: notifications, systemNotices: [] })
   } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+// 账单流水
+app.get('/api/parent/billing', authRequired('parent'), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT * FROM payment_transactions WHERE user_id = ? ORDER BY created_at DESC',
+      [req.user.id]
+    )
+    ok(res, rows.map((r) => ({
+      id: Number(r.id),
+      orderNo: r.order_no || '',
+      type: r.type || 'other',
+      title: r.title || '',
+      amount: Number(r.amount || 0),
+      status: r.status || 'pending',
+      payMethod: r.pay_method || '',
+      remark: r.remark || '',
+      createdAt: toDate(r.created_at)
+    })))
+  } catch (error) {
+    if (isOptionalSchemaError(error)) return ok(res, [])
+    fail(res, 500, error.message)
+  }
+})
+
+app.get('/api/parent/billing/stats', authRequired('parent'), async (req, res) => {
+  try {
+    const [totalRows] = await pool.query(
+      "SELECT COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS total_spent, COUNT(*) AS total_count FROM payment_transactions WHERE user_id = ? AND status IN ('paid','refunded')",
+      [req.user.id]
+    )
+    const [monthRows] = await pool.query(
+      "SELECT COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS month_spent FROM payment_transactions WHERE user_id = ? AND status IN ('paid','refunded') AND YEAR(created_at) = YEAR(NOW()) AND MONTH(created_at) = MONTH(NOW())",
+      [req.user.id]
+    )
+    ok(res, {
+      totalSpent: Number(totalRows[0]?.total_spent || 0),
+      monthSpent: Number(monthRows[0]?.month_spent || 0),
+      totalCount: Number(totalRows[0]?.total_count || 0)
+    })
+  } catch (error) {
+    if (isOptionalSchemaError(error)) return ok(res, { totalSpent: 0, monthSpent: 0, totalCount: 0 })
     fail(res, 500, error.message)
   }
 })
@@ -1860,6 +2207,52 @@ app.post('/api/teacher/invite/create', authRequired('teacher'), async (req, res)
   ok(res, { inviteCode })
 })
 
+app.get('/api/parent/invite/summary', authRequired('parent'), async (req, res) => {
+  let rows = []
+  let latest = []
+  try {
+    ;[rows] = await pool.query(
+      `SELECT
+          SUM(CASE WHEN invitee_id IS NOT NULL THEN 1 ELSE 0 END) AS invited_count,
+          SUM(CASE WHEN status = 'verified' AND invitee_id IS NOT NULL THEN 1 ELSE 0 END) AS verified_count
+         FROM invite_records
+        WHERE inviter_id = ? AND role = 'parent'`,
+      [req.user.id]
+    )
+    ;[latest] = await pool.query(
+      `SELECT invite_code
+         FROM invite_records
+        WHERE inviter_id = ? AND role = 'parent'
+        ORDER BY id DESC
+        LIMIT 1`,
+      [req.user.id]
+    )
+  } catch (error) {
+    if (!isOptionalSchemaError(error)) return fail(res, 500, error.message)
+  }
+  const verified = Number(rows[0]?.verified_count || 0)
+  ok(res, {
+    inviteCode: latest[0]?.invite_code || '',
+    totalInvited: Number(rows[0]?.invited_count || 0),
+    verifiedInvited: verified,
+    extraUnlockReward: verified
+  })
+})
+
+app.post('/api/parent/invite/create', authRequired('parent'), async (req, res) => {
+  const inviteCode = `P${req.user.id}${Date.now().toString().slice(-6)}`
+  try {
+    await pool.query(
+      'INSERT INTO invite_records (inviter_id, role, invite_code, status, reward_granted) VALUES (?, ?, ?, ?, ?)',
+      [req.user.id, 'parent', inviteCode, 'pending', 0]
+    )
+  } catch (error) {
+    if (isOptionalSchemaError(error)) return fail(res, 404, 'Invite module not enabled')
+    return fail(res, 500, error.message)
+  }
+  ok(res, { inviteCode })
+})
+
 // Discover
 const discoverDTO = (row) => {
   const subjects = parseArrayField(row.subjects || row.preferred_subjects)
@@ -2110,15 +2503,260 @@ app.post('/api/messages/:conversationId/read', authRequired(), async (req, res) 
   ok(res, { success: true })
 })
 
+app.post('/api/reports/messages/:messageId', authRequired(), async (req, res) => {
+  const messageId = Number(req.params.messageId)
+  const type = normalizeComplaintType(req.body?.type)
+  const content = String(req.body?.content || '').trim()
+  const evidence = req.body?.evidence && typeof req.body.evidence === 'object' ? req.body.evidence : {}
+  if (!Number.isInteger(messageId) || messageId <= 0) return fail(res, 400, 'Invalid message id')
+  if (content.length < 5 || content.length > 500) return fail(res, 400, '举报内容需在 5~500 字')
+  try {
+    const [rows] = await pool.query(
+      `SELECT m.id, m.conversation_id, m.sender_id, m.content, c.parent_id, c.teacher_id
+         FROM messages m
+         JOIN conversations c ON c.id = m.conversation_id
+        WHERE m.id = ?
+        LIMIT 1`,
+      [messageId]
+    )
+    const message = rows[0]
+    if (!message) return fail(res, 404, 'Message not found')
+    if (Number(message.parent_id) !== req.user.id && Number(message.teacher_id) !== req.user.id) return fail(res, 403, 'Forbidden')
+    if (Number(message.sender_id) === req.user.id) return fail(res, 400, '不能举报自己发送的消息')
+    const payload = {
+      messageId: Number(message.id),
+      conversationId: Number(message.conversation_id),
+      snippet: String(message.content || '').slice(0, 120),
+      ...evidence
+    }
+    const [result] = await pool.query(
+      `INSERT INTO complaints (complainant_id, respondent_id, match_id, type, content, evidence, status)
+       VALUES (?, ?, NULL, ?, ?, ?, 'pending')`,
+      [req.user.id, Number(message.sender_id), type, content, JSON.stringify(payload)]
+    )
+    await createAuditLog({
+      actorType: 'user',
+      actorId: req.user.id,
+      action: 'report_message_created',
+      targetType: 'complaint',
+      targetId: result.insertId,
+      details: payload
+    })
+    ok(res, { reportId: Number(result.insertId), status: 'pending' }, '举报已提交')
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
+app.get('/api/reports/mine', authRequired(), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT c.id, c.type, c.content, c.status, c.result, c.appeal_status, c.created_at,
+              c.evidence, u.nickname AS respondent_name, u.role AS respondent_role
+         FROM complaints c
+         JOIN users u ON u.id = c.respondent_id
+        WHERE c.complainant_id = ?
+        ORDER BY c.created_at DESC
+        LIMIT 200`,
+      [req.user.id]
+    )
+    ok(
+      res,
+      rows.map((row) => ({
+        id: Number(row.id),
+        type: row.type || 'other',
+        content: row.content || '',
+        status: row.status || 'pending',
+        result: row.result || '',
+        appealStatus: row.appeal_status || 'none',
+        respondentName: row.respondent_name || '',
+        respondentRole: row.respondent_role || '',
+        evidence: parseObjectField(row.evidence),
+        createdAt: toISO(row.created_at)
+      }))
+    )
+  } catch (error) {
+    if (isOptionalSchemaError(error)) return ok(res, [])
+    fail(res, 500, error.message)
+  }
+})
+
+app.get('/api/admin/reports/review-queue', adminReviewRequired(), async (req, res) => {
+  const status = String(req.query?.status || '').trim()
+  const validStatus = new Set(['pending', 'processing', 'resolved', 'rejected'])
+  const withStatus = validStatus.has(status)
+  try {
+    const [rows] = await pool.query(
+      `SELECT c.id, c.type, c.content, c.status, c.result, c.created_at, c.updated_at, c.evidence,
+              cu.nickname AS complainant_name, cu.role AS complainant_role,
+              ru.nickname AS respondent_name, ru.role AS respondent_role
+         FROM complaints c
+         JOIN users cu ON cu.id = c.complainant_id
+         JOIN users ru ON ru.id = c.respondent_id
+        WHERE (? = 0 OR c.status = ?)
+        ORDER BY c.created_at DESC
+        LIMIT 300`,
+      [withStatus ? 1 : 0, status]
+    )
+    ok(
+      res,
+      rows.map((row) => ({
+        id: Number(row.id),
+        type: row.type || 'other',
+        content: row.content || '',
+        status: row.status || 'pending',
+        result: row.result || '',
+        complainantName: row.complainant_name || '',
+        complainantRole: row.complainant_role || '',
+        respondentName: row.respondent_name || '',
+        respondentRole: row.respondent_role || '',
+        evidence: parseObjectField(row.evidence),
+        createdAt: toISO(row.created_at),
+        updatedAt: toISO(row.updated_at)
+      }))
+    )
+  } catch (error) {
+    if (isOptionalSchemaError(error)) return ok(res, [])
+    fail(res, 500, error.message)
+  }
+})
+
+app.patch('/api/admin/reports/:id/review', adminReviewRequired(), async (req, res) => {
+  const id = Number(req.params.id)
+  const nextStatus = String(req.body?.status || '').trim()
+  const resultText = String(req.body?.result || '').trim().slice(0, 500)
+  const action = String(req.body?.action || 'none').trim()
+  const muteHours = Math.max(1, Number(req.body?.muteHours || 24))
+  if (!Number.isInteger(id) || id <= 0) return fail(res, 400, 'Invalid report id')
+  if (!['processing', 'resolved', 'rejected'].includes(nextStatus)) return fail(res, 400, 'Invalid status')
+  if (!['none', 'warn', 'mute', 'ban'].includes(action)) return fail(res, 400, 'Invalid action')
+
+  const conn = await pool.getConnection()
+  let restrictionId = 0
+  let complaint = null
+  try {
+    await conn.beginTransaction()
+    const [rows] = await conn.query('SELECT id, respondent_id, status FROM complaints WHERE id = ? LIMIT 1 FOR UPDATE', [id])
+    complaint = rows[0]
+    if (!complaint) {
+      await conn.rollback()
+      return fail(res, 404, 'Report not found')
+    }
+
+    await conn.query(
+      `UPDATE complaints
+          SET status = ?, result = ?, handled_by = 0, handled_at = NOW(), updated_at = NOW()
+        WHERE id = ?`,
+      [nextStatus, resultText, id]
+    )
+
+    if (action === 'mute' || action === 'ban') {
+      const endAt = action === 'mute' ? new Date(Date.now() + muteHours * 60 * 60 * 1000) : null
+      const [insertRestriction] = await conn.query(
+        `INSERT INTO user_restrictions (user_id, restriction_type, reason, source_complaint_id, start_at, end_at, is_active)
+         VALUES (?, ?, ?, ?, NOW(), ?, TRUE)`,
+        [Number(complaint.respondent_id), action, resultText || '管理员处置', id, endAt]
+      )
+      restrictionId = Number(insertRestriction.insertId || 0)
+    }
+
+    await conn.commit()
+  } catch (error) {
+    await conn.rollback()
+    return fail(res, 500, error.message)
+  } finally {
+    conn.release()
+  }
+
+  await createAuditLog({
+    actorType: 'admin',
+    actorId: req.adminId,
+    action: 'complaint_reviewed',
+    targetType: 'complaint',
+    targetId: id,
+    details: { nextStatus, action, muteHours, restrictionId, respondentId: Number(complaint?.respondent_id || 0) }
+  })
+
+  ok(res, { reviewed: true, status: nextStatus, action, restrictionId })
+})
+
+app.get('/api/admin/restrictions', adminReviewRequired(), async (req, res) => {
+  const userId = Number(req.query?.userId || 0)
+  const onlyActive = String(req.query?.active || 'true').trim().toLowerCase() !== 'false'
+  try {
+    const [rows] = await pool.query(
+      `SELECT r.id, r.user_id, r.restriction_type, r.reason, r.source_complaint_id, r.start_at, r.end_at, r.is_active, r.created_at,
+              u.nickname, u.role
+         FROM user_restrictions r
+         JOIN users u ON u.id = r.user_id
+        WHERE (? = 0 OR r.user_id = ?)
+          AND (? = 0 OR r.is_active = TRUE)
+        ORDER BY r.created_at DESC
+        LIMIT 300`,
+      [userId > 0 ? 1 : 0, userId, onlyActive ? 1 : 0]
+    )
+    ok(
+      res,
+      rows.map((row) => ({
+        id: Number(row.id),
+        userId: Number(row.user_id),
+        nickname: row.nickname || '',
+        role: row.role || '',
+        restrictionType: row.restriction_type,
+        reason: row.reason || '',
+        sourceComplaintId: row.source_complaint_id ? Number(row.source_complaint_id) : null,
+        isActive: !!row.is_active,
+        startAt: toISO(row.start_at),
+        endAt: toISO(row.end_at),
+        createdAt: toISO(row.created_at)
+      }))
+    )
+  } catch (error) {
+    if (isOptionalSchemaError(error)) return ok(res, [])
+    fail(res, 500, error.message)
+  }
+})
+
+app.post('/api/admin/restrictions/:id/release', adminReviewRequired(), async (req, res) => {
+  const id = Number(req.params.id)
+  if (!Number.isInteger(id) || id <= 0) return fail(res, 400, 'Invalid restriction id')
+  try {
+    const [result] = await pool.query(
+      `UPDATE user_restrictions
+          SET is_active = FALSE, end_at = NOW(), updated_at = NOW()
+        WHERE id = ?`,
+      [id]
+    )
+    if (!result.affectedRows) return fail(res, 404, 'Restriction not found')
+    await createAuditLog({
+      actorType: 'admin',
+      actorId: req.adminId,
+      action: 'restriction_released',
+      targetType: 'user_restriction',
+      targetId: id,
+      details: {}
+    })
+    ok(res, { released: true })
+  } catch (error) {
+    fail(res, 500, error.message)
+  }
+})
+
 io.use((socket, next) => {
-  const tokenFromAuth = socket.handshake.auth?.token
-  const tokenFromHeader = String(socket.handshake.headers?.authorization || '')
-    .replace(/^Bearer\s+/i, '')
-    .trim()
-  const user = verifyToken(tokenFromAuth || tokenFromHeader)
-  if (!user) return next(new Error('Unauthorized'))
-  socket.user = user
-  next()
+  ;(async () => {
+    const tokenFromAuth = socket.handshake.auth?.token
+    const tokenFromHeader = String(socket.handshake.headers?.authorization || '')
+      .replace(/^Bearer\s+/i, '')
+      .trim()
+    const user = verifyToken(tokenFromAuth || tokenFromHeader)
+    if (!user) return next(new Error('Unauthorized'))
+    const [settingRows] = await pool.query('SELECT deactivated FROM user_settings WHERE user_id = ? LIMIT 1', [user.id])
+    if (settingRows[0]?.deactivated) return next(new Error('Account deactivated'))
+    const restrictions = await getActiveRestrictions(user.id)
+    if (restrictions.some((item) => item.restriction_type === 'ban')) return next(new Error('Account restricted'))
+    socket.user = user
+    next()
+  })().catch(() => next(new Error('Unauthorized')))
 })
 
 io.on('connection', (socket) => {
@@ -2128,6 +2766,28 @@ io.on('connection', (socket) => {
     const conversationId = Number(data?.conversationId || 0)
     const content = String(data?.content || '').trim()
     if (!conversationId || !content) return
+    if (content.length > MESSAGE_MAX_LENGTH) {
+      socket.emit('message_error', { code: 'MESSAGE_TOO_LONG', message: `单条消息不能超过${MESSAGE_MAX_LENGTH}字` })
+      return
+    }
+    if (isMessageRateLimited(userId)) {
+      socket.emit('message_error', { code: 'MESSAGE_RATE_LIMITED', message: '发送过于频繁，请稍后再试' })
+      return
+    }
+    const matchedSensitiveWords = findSensitiveWords(content)
+    if (matchedSensitiveWords.length > 0) {
+      socket.emit('message_error', {
+        code: 'MESSAGE_SENSITIVE_BLOCKED',
+        message: '消息包含敏感词，请修改后发送',
+        matchedWords: matchedSensitiveWords
+      })
+      return
+    }
+    const restrictions = await getActiveRestrictions(userId)
+    if (restrictions.some((item) => item.restriction_type === 'mute' || item.restriction_type === 'ban')) {
+      socket.emit('message_error', { code: 'MESSAGE_RESTRICTED', message: '当前账号被限制发言' })
+      return
+    }
     const conn = await pool.getConnection()
     try {
       await conn.beginTransaction()
@@ -2169,11 +2829,20 @@ setInterval(() => {
   })
 }, 10 * 60 * 1000)
 
+setInterval(() => {
+  maybeRunRetentionJob().catch((error) => {
+    console.error('[retention] scheduler error:', error?.message || error)
+  })
+}, RETENTION_JOB_INTERVAL_MS)
+
 ensureMatchingSchema()
   .catch((error) => {
     console.error('[schema] ensure matching schema failed:', error?.message || error)
   })
   .finally(() => {
+    maybeRunRetentionJob().catch((error) => {
+      console.error('[retention] initial run failed:', error?.message || error)
+    })
     httpServer.listen(PORT, () => {
       console.log(`[api] running at http://localhost:${PORT} (with WebSocket)`)
     })

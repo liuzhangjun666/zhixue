@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Edit3, ClipboardList, Star, Crown, Settings, Bell } from 'lucide-vue-next'
-import { parentApi, type ParentProfileDTO } from '../api/parent'
+import { Edit3, ClipboardList, Star, Crown, Settings, Receipt } from 'lucide-vue-next'
+import { parentApi, type ParentInviteSummaryDTO, type ParentProfileDTO } from '../api/parent'
 
 const router = useRouter()
 const PARENT_AVATAR_CACHE_KEY = 'zhixue_parent_avatar_cache'
@@ -16,8 +16,13 @@ const membershipStatus = ref({
 })
 const requestCount = ref<number>(0)
 const reviewCount = ref<number>(0)
-const notificationCount = ref<number>(0)
 const fileInput = ref<HTMLInputElement | null>(null)
+const invite = ref<ParentInviteSummaryDTO>({
+  inviteCode: '',
+  totalInvited: 0,
+  verifiedInvited: 0,
+  extraUnlockReward: 0
+})
 
 const loadCachedAvatar = () => {
   if (typeof window === 'undefined') return ''
@@ -53,12 +58,6 @@ onMounted(async () => {
     console.error('Failed to load request count', e)
   }
   try {
-    const notifications = await parentApi.getNotifications()
-    notificationCount.value = Array.isArray(notifications.matchUpdates) ? notifications.matchUpdates.length : 0
-  } catch (e) {
-    console.error('Failed to load notifications', e)
-  }
-  try {
     const [membership, reviews] = await Promise.all([parentApi.getMembershipStatus(), parentApi.getReviews()])
     membershipStatus.value = {
       planName: membership.planName || '普通用户',
@@ -68,6 +67,11 @@ onMounted(async () => {
     reviewCount.value = Array.isArray(reviews) ? reviews.length : 0
   } catch (e) {
     console.error('Failed to load membership/reviews', e)
+  }
+  try {
+    invite.value = await parentApi.getInviteSummary()
+  } catch (e) {
+    console.error('Failed to load invite summary', e)
   }
 })
 
@@ -109,9 +113,9 @@ interface MenuItem {
 
 const menuItems = computed<MenuItem[]>(() => [
   { title: '编辑资料', icon: Edit3, path: '/parent/edit' },
-  { title: '通知中心', icon: Bell, path: '/parent/notifications', badge: notificationCount.value > 0 ? notificationCount.value : undefined },
   { title: '我的请求', icon: ClipboardList, path: '/parent/requests', badge: requestCount.value > 0 ? requestCount.value : undefined },
   { title: '我的评价', icon: Star, path: '/parent/reviews', suffix: `共 ${reviewCount.value} 条` },
+  { title: '账单中心', icon: Receipt, path: '/parent/billing' },
   {
     title: '会员中心',
     icon: Crown,
@@ -126,6 +130,15 @@ const handleNavigate = (path: string) => {
   if (!path) return
 
   router.push(path).catch(() => {})
+}
+
+const createInviteCode = async () => {
+  try {
+    const result = await parentApi.createInviteCode()
+    invite.value.inviteCode = String(result.inviteCode || '')
+  } catch (error) {
+    console.error('Failed to create invite code', error)
+  }
 }
 </script>
 
@@ -189,6 +202,18 @@ const handleNavigate = (path: string) => {
             <span v-if="item.badge" class="menu-item-badge">{{ item.badge }}</span>
           </div>
         </div>
+      </div>
+
+      <div class="apple-card invite-card">
+        <h3 class="menu-title mb-3">邀请有礼</h3>
+        <p class="invite-desc">邀请新家长完成注册，你将获得额外解锁次数奖励。</p>
+        <div class="invite-row">
+          <span class="invite-code">{{ invite.inviteCode || '暂无邀请码' }}</span>
+          <button class="btn-invite" @click="createInviteCode">生成专属邀请码</button>
+        </div>
+        <p class="invite-meta">
+          已邀请 {{ invite.totalInvited }} 人，完成注册 {{ invite.verifiedInvited }} 人，累计额外解锁 {{ invite.extraUnlockReward }} 次
+        </p>
       </div>
     </div>
   </div>
@@ -529,6 +554,54 @@ body {
   align-items: center;
   justify-content: center;
   padding: 0 5px;
+}
+
+.invite-card {
+  grid-column: 1 / -1;
+}
+
+.invite-desc {
+  color: #6b7280;
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+
+.invite-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.invite-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  color: #111827;
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.invite-meta {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.btn-invite {
+  border: none;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #111827;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-invite:hover {
+  background: #e5e7eb;
 }
 
 @media (max-width: 768px) {

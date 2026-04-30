@@ -18,9 +18,11 @@ const route = useRoute()
     <div class="footer-content">
       <span>© 2025 知学空间</span>
       <span class="divider">|</span>
-      <a href="#" class="footer-link">ICP备案号</a>
+      <a class="footer-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">ICP备案号（待补充）</a>
       <span class="divider">|</span>
-      <a href="#" class="footer-link">隐私政策</a>
+      <router-link class="footer-link" to="/legal/privacy">隐私政策</router-link>
+      <span class="divider">|</span>
+      <router-link class="footer-link" to="/legal/terms">用户协议</router-link>
     </div>
   </footer>
 </template>

@@ -96,6 +96,34 @@ export interface ParentNotificationsDTO {
   }>
 }
 
+export interface ParentInviteSummaryDTO {
+  inviteCode: string
+  totalInvited: number
+  verifiedInvited: number
+  extraUnlockReward: number
+}
+
+export type TransactionType = 'membership' | 'unlock' | 'refund' | 'other'
+export type TransactionStatus = 'pending' | 'paid' | 'failed' | 'refunded'
+
+export interface BillingTransactionDTO {
+  id: number
+  orderNo: string
+  type: TransactionType
+  title: string
+  amount: number
+  status: TransactionStatus
+  payMethod: string
+  remark: string
+  createdAt: string
+}
+
+export interface BillingStatsDTO {
+  totalSpent: number
+  monthSpent: number
+  totalCount: number
+}
+
 const ENDPOINTS = {
   profile: '/api/parent/profile',
   requests: '/api/parent/requests',
@@ -109,7 +137,11 @@ const ENDPOINTS = {
   settingsNotifications: '/api/parent/settings/notifications',
   settingsPrivacy: '/api/parent/settings/privacy',
   settingsDeactivate: '/api/parent/settings/deactivate',
-  notifications: '/api/parent/notifications'
+  notifications: '/api/parent/notifications',
+  inviteSummary: '/api/parent/invite/summary',
+  inviteCreate: '/api/parent/invite/create',
+  billing: '/api/parent/billing',
+  billingStats: '/api/parent/billing/stats'
 }
 
 const parseStatus = (value: unknown): RequestStatus => {
@@ -194,6 +226,24 @@ const defaultParentPlans = (): MembershipPlanDTO[] => [
     recommended: true
   }
 ]
+
+const normalizeTransaction = (raw: Record<string, any>): BillingTransactionDTO => ({
+  id: Number(raw.id || 0),
+  orderNo: String(raw.orderNo || raw.order_no || ''),
+  type: (raw.type || 'other') as TransactionType,
+  title: String(raw.title || ''),
+  amount: Number(raw.amount || 0),
+  status: (raw.status || 'pending') as TransactionStatus,
+  payMethod: String(raw.payMethod || raw.pay_method || ''),
+  remark: String(raw.remark || ''),
+  createdAt: String(raw.createdAt || raw.created_at || '')
+})
+
+const normalizeBillingStats = (raw: Record<string, any>): BillingStatsDTO => ({
+  totalSpent: Number(raw.totalSpent || raw.total_spent || 0),
+  monthSpent: Number(raw.monthSpent || raw.month_spent || 0),
+  totalCount: Number(raw.totalCount || raw.total_count || 0)
+})
 
 const normalizeSettings = (raw: Record<string, any>): ParentSettingsDTO => ({
   notifications: {
@@ -327,5 +377,31 @@ export const parentApi = {
   async getNotifications() {
     const payload = await request(ENDPOINTS.notifications)
     return unwrapData(payload, { matchUpdates: [], systemNotices: [] } as ParentNotificationsDTO)
+  },
+
+  async getInviteSummary() {
+    const payload = await request(ENDPOINTS.inviteSummary)
+    return unwrapData(payload, {
+      inviteCode: '',
+      totalInvited: 0,
+      verifiedInvited: 0,
+      extraUnlockReward: 0
+    } as ParentInviteSummaryDTO)
+  },
+
+  async createInviteCode() {
+    const payload = await request(ENDPOINTS.inviteCreate, { method: 'POST' })
+    return unwrapData(payload, { inviteCode: '' })
+  },
+
+  async getBilling() {
+    const payload = await request(ENDPOINTS.billing)
+    const list = unwrapData(payload, [] as Record<string, any>[])
+    return Array.isArray(list) ? list.map(normalizeTransaction) : []
+  },
+
+  async getBillingStats() {
+    const payload = await request(ENDPOINTS.billingStats)
+    return normalizeBillingStats(unwrapData(payload, {} as Record<string, any>))
   }
 }

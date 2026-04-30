@@ -24,6 +24,16 @@ const routes = [
     component: () => import('../views/TeacherAuth.vue')
   },
   {
+    path: '/legal/privacy',
+    name: 'LegalPrivacy',
+    component: () => import('../views/LegalPrivacy.vue')
+  },
+  {
+    path: '/legal/terms',
+    name: 'LegalTerms',
+    component: () => import('../views/LegalTerms.vue')
+  },
+  {
     path: '/discover',
     name: 'Discover',
     component: () => import('../views/Discover.vue')
@@ -77,6 +87,11 @@ const routes = [
     path: '/parent/settings',
     name: 'ParentSettings',
     component: () => import('../views/parent/Settings.vue')
+  },
+  {
+    path: '/parent/billing',
+    name: 'ParentBilling',
+    component: () => import('../views/parent/Billing.vue')
   },
   {
     path: '/teacher-center',

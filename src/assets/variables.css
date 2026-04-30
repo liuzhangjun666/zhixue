@@ -1,45 +1,45 @@
-:root {
-  /* 品牌色 */
-  --color-primary: #7C3AED;
-  --color-primary-dark: #6D28D9;
-  --color-primary-light: #8B5CF6;
-  
+﻿:root {
+  /* 品牌色（教培稳重蓝 + 教研绿） */
+  --color-primary: #1d4ed8;
+  --color-primary-dark: #1e40af;
+  --color-primary-light: #3b82f6;
+
   /* 角色辅助色 */
-  --color-parent: #E9407A;
-  --color-parent-dark: #BE185D;
-  --color-teacher: #10A881;
-  --color-teacher-dark: #059669;
-  
+  --color-parent: #d97706;
+  --color-parent-dark: #b45309;
+  --color-teacher: #0f766e;
+  --color-teacher-dark: #115e59;
+
   /* 文本色 */
-  --color-text-main: #1F2937;
-  --color-text-sub: #6B7280;
-  --color-text-light: #9CA3AF;
-  
-  /* 边框与辅助色 */
-  --color-border: #E5E7EB;
-  --color-bg-page: #F9F5FF;
-  --color-warning: #F59E0B;
-  --color-danger: #EF4444;
-  
-  /* 渐变色 */
-  --gradient-page: linear-gradient(135deg, #F9F5FF 0%, #F3E8FF 50%, #EDE9FE 100%);
-  --gradient-parent: linear-gradient(135deg, #E9407A 0%, #BE185D 100%);
-  --gradient-teacher: linear-gradient(135deg, #10A881 0%, #059669 100%);
-  --gradient-primary: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%);
-  
-  /* 玻璃态背景 */
-  --glass-bg: rgba(255, 255, 255, 0.95);
-  --glass-border: rgba(255, 255, 255, 0.5);
-  
+  --color-text-main: #0f172a;
+  --color-text-sub: #475569;
+  --color-text-light: #94a3b8;
+
+  /* 边框与背景 */
+  --color-border: #e2e8f0;
+  --color-bg-page: #f8fafc;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+
+  /* 渐变（弱化） */
+  --gradient-page: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  --gradient-parent: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+  --gradient-teacher: linear-gradient(135deg, #0f766e 0%, #115e59 100%);
+  --gradient-primary: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+
+  /* 卡片 */
+  --glass-bg: #ffffff;
+  --glass-border: #e2e8f0;
+
   /* 阴影 */
-  --shadow-card: 0 4px 24px rgba(124, 58, 237, 0.1);
-  --shadow-btn: 0 4px 12px rgba(124, 58, 237, 0.3);
-  --shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.15);
-  
+  --shadow-card: 0 8px 24px rgba(15, 23, 42, 0.06);
+  --shadow-btn: 0 6px 18px rgba(29, 78, 216, 0.24);
+  --shadow-modal: 0 20px 40px rgba(15, 23, 42, 0.2);
+
   /* 布局与圆角 */
   --max-width: 1200px;
   --page-padding: 24px;
-  --radius-card: 16px;
+  --radius-card: 14px;
   --radius-btn: 10px;
   --radius-input: 10px;
   --spacing-base: 24px;

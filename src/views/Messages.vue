@@ -46,7 +46,27 @@
             :class="{ mine: msg.senderId === currentUserId }"
           >
             <div class="bubble-content">{{ msg.content }}</div>
+            <div v-if="msg.senderId !== currentUserId" class="bubble-actions">
+              <button class="report-btn" @click="reportMessage(msg)">举报</button>
+            </div>
             <div class="bubble-time">{{ formatTime(msg.createdAt) }}</div>
+          </div>
+        </div>
+
+        <div v-if="reportDraft.visible" class="report-panel">
+          <div class="report-title">举报对象：{{ reportDraft.targetName || '对方用户' }}</div>
+          <textarea
+            v-model="reportDraft.content"
+            class="report-textarea"
+            placeholder="请输入举报原因（5-500字）"
+            maxlength="500"
+          />
+          <div class="report-meta">{{ reportDraft.content.trim().length }}/500</div>
+          <div class="report-actions">
+            <button class="report-submit" :disabled="reportSubmitting" @click="submitReport">
+              {{ reportSubmitting ? '提交中...' : '提交举报' }}
+            </button>
+            <button class="report-cancel" :disabled="reportSubmitting" @click="cancelReport">取消</button>
           </div>
         </div>
 
@@ -55,12 +75,18 @@
             v-model="newMessage"
             type="text"
             placeholder="输入消息..."
+            maxlength="1000"
             @keyup.enter="sendMessage"
           />
           <button class="send-btn" @click="sendMessage" :disabled="!newMessage.trim()">
             <SendIcon class="icon" />
             发送
           </button>
+        </div>
+        <div class="chat-input-hint">
+          <span>{{ newMessage.trim().length }}/1000</span>
+          <span v-if="sendError" class="error">{{ sendError }}</span>
+          <span v-else-if="reportStatus" class="ok">{{ reportStatus }}</span>
         </div>
       </template>
 
@@ -88,9 +114,19 @@ const conversations = ref([])
 const currentConversation = ref(null)
 const currentMessages = ref([])
 const newMessage = ref('')
+const sendError = ref('')
+const reportStatus = ref('')
+const reportSubmitting = ref(false)
+const reportDraft = ref({
+  visible: false,
+  messageId: 0,
+  targetName: '',
+  content: ''
+})
 const messagesListRef = ref(null)
 const initialConversationId = ref(Number(route.query.conversationId || 0))
 const WS_BASE_URL = API_BASE_URL ? new URL(API_BASE_URL, window.location.origin).origin : window.location.origin
+const MESSAGE_MAX_LENGTH = 1000
 
 let socket = null
 
@@ -138,16 +174,70 @@ const selectConversation = async (conv) => {
 }
 
 const sendMessage = () => {
-  if (!newMessage.value.trim() || !currentConversation.value) return
+  const content = newMessage.value.trim()
+  if (!content || !currentConversation.value) return
+  if (content.length > MESSAGE_MAX_LENGTH) {
+    sendError.value = `单条消息不能超过${MESSAGE_MAX_LENGTH}字`
+    return
+  }
+  sendError.value = ''
+  reportStatus.value = ''
 
   const payload = {
     conversationId: currentConversation.value.id,
     receiverId: currentConversation.value.contactId,
-    content: newMessage.value.trim()
+    content
   }
 
   socket.emit('send_message', payload)
   newMessage.value = ''
+}
+
+const reportMessage = (msg) => {
+  reportDraft.value.visible = true
+  reportDraft.value.messageId = Number(msg.id || 0)
+  reportDraft.value.targetName = String(currentConversation.value?.contactName || '').trim()
+  reportDraft.value.content = ''
+  reportStatus.value = ''
+  sendError.value = ''
+}
+
+const cancelReport = () => {
+  reportDraft.value.visible = false
+  reportDraft.value.messageId = 0
+  reportDraft.value.targetName = ''
+  reportDraft.value.content = ''
+}
+
+const submitReport = async () => {
+  const content = reportDraft.value.content.trim()
+  const messageId = Number(reportDraft.value.messageId || 0)
+  if (!messageId) {
+    reportStatus.value = '举报目标无效'
+    return
+  }
+  if (content.length < 5 || content.length > 500) {
+    reportStatus.value = '举报原因需在 5-500 字'
+    return
+  }
+  reportSubmitting.value = true
+  try {
+    await request(`/api/reports/messages/${messageId}`, {
+      method: 'POST',
+      body: {
+        type: 'harassment',
+        content
+      }
+    })
+    reportStatus.value = '举报已提交'
+    sendError.value = ''
+    cancelReport()
+  } catch (error) {
+    reportStatus.value = ''
+    sendError.value = (error && error.message) || '举报提交失败'
+  } finally {
+    reportSubmitting.value = false
+  }
 }
 
 onMounted(() => {
@@ -186,11 +276,18 @@ onMounted(() => {
   })
 
   socket.on('message_sent', (msg) => {
+    sendError.value = ''
+    reportStatus.value = ''
     if (currentConversation.value && msg.conversationId === currentConversation.value.id) {
       currentMessages.value.push(msg)
       scrollToBottom()
     }
     loadConversations()
+  })
+
+  socket.on('message_error', (payload) => {
+    sendError.value = String(payload?.message || '消息发送失败，请稍后重试')
+    reportStatus.value = ''
   })
 
   socket.on('connect_error', (error) => {
@@ -386,6 +483,19 @@ onUnmounted(() => {
   color: #86868b;
 }
 
+.bubble-actions {
+  margin-top: 4px;
+}
+
+.report-btn {
+  border: none;
+  background: transparent;
+  color: #dc2626;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+
 .chat-input-area {
   display: flex;
   gap: 10px;
@@ -405,6 +515,85 @@ onUnmounted(() => {
 .chat-input-area input:focus {
   border-color: #0071e3;
   box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.12);
+}
+
+.report-panel {
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
+  padding: 12px 20px;
+  background: rgba(220, 38, 38, 0.03);
+}
+
+.report-title {
+  font-size: 13px;
+  color: #991b1b;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.report-textarea {
+  width: 100%;
+  min-height: 72px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  resize: vertical;
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+}
+
+.report-textarea:focus {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+}
+
+.report-meta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.report-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.report-submit,
+.report-cancel {
+  border: none;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.report-submit {
+  background: #dc2626;
+  color: #fff;
+}
+
+.report-cancel {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.chat-input-hint {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px 12px;
+  color: #94a3b8;
+  font-size: 12px;
+  min-height: 20px;
+}
+
+.chat-input-hint .error {
+  color: #dc2626;
+}
+
+.chat-input-hint .ok {
+  color: #16a34a;
 }
 
 .send-btn {
