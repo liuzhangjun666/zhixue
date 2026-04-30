@@ -98,6 +98,75 @@ const ensureTeacherVerificationsTable = async () => {
   `)
 }
 
+const ensureUserConsentsTable = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_consents (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      role ENUM('parent','teacher') NOT NULL,
+      phone VARCHAR(20) NOT NULL,
+      policy_version VARCHAR(40) NOT NULL,
+      agreed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      ip VARCHAR(64) NOT NULL DEFAULT '',
+      user_agent VARCHAR(255) NOT NULL DEFAULT '',
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_user_consents_user_time(user_id, agreed_at)
+    ) ENGINE=InnoDB;
+  `)
+}
+
+const ensureUserRestrictionsTable = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_restrictions (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      restriction_type ENUM('mute','ban') NOT NULL,
+      reason VARCHAR(255) NOT NULL DEFAULT '',
+      source_complaint_id INT DEFAULT NULL,
+      start_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      end_at DATETIME DEFAULT NULL,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_user_restrictions_active(user_id, restriction_type, is_active, end_at)
+    ) ENGINE=InnoDB;
+  `)
+}
+
+const ensureAuditLogsTable = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      actor_type ENUM('user','admin','system') NOT NULL,
+      actor_id VARCHAR(64) NOT NULL DEFAULT '',
+      action VARCHAR(100) NOT NULL,
+      target_type VARCHAR(50) NOT NULL DEFAULT '',
+      target_id VARCHAR(64) NOT NULL DEFAULT '',
+      details JSON,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_audit_logs_time(created_at),
+      INDEX idx_audit_logs_action(action)
+    ) ENGINE=InnoDB;
+  `)
+}
+
+const ensureMessageArchivesTable = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS message_archives (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      message_id INT NOT NULL UNIQUE,
+      conversation_id INT NOT NULL,
+      sender_id INT NOT NULL,
+      content TEXT NOT NULL,
+      is_read BOOLEAN DEFAULT FALSE,
+      created_at DATETIME NOT NULL,
+      archived_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      archive_reason VARCHAR(50) NOT NULL DEFAULT 'retention_policy',
+      INDEX idx_message_archives_time(created_at)
+    ) ENGINE=InnoDB;
+  `)
+}
+
 const ensureReviewsTable = async () => {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS reviews (
@@ -204,6 +273,10 @@ async function run() {
     )
     await ensureInviteRecordsTable()
     await ensureTeacherVerificationsTable()
+    await ensureUserConsentsTable()
+    await ensureUserRestrictionsTable()
+    await ensureAuditLogsTable()
+    await ensureMessageArchivesTable()
     await pool.query('ALTER TABLE teacher_verifications MODIFY COLUMN cert_url LONGTEXT NOT NULL')
     console.log('[ok] ensured teacher_verifications.cert_url LONGTEXT')
 

@@ -1,4 +1,4 @@
-@import './variables.css';
+﻿@import './variables.css';
 
 * {
   box-sizing: border-box;
@@ -7,19 +7,19 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", "Segoe UI", sans-serif;
   background: var(--gradient-page);
   color: var(--color-text-main);
   min-height: 100vh;
-  line-height: 1.5;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden; /* 隐藏横向滚动条 */
+  overflow-x: hidden;
 }
 
 a {
   text-decoration: none;
   color: inherit;
-  transition: color 0.3s;
+  transition: color 0.2s;
 }
 
 button {
@@ -33,32 +33,28 @@ ul, ol {
   list-style: none;
 }
 
-/* 玻璃态卡片公共类 */
 .glass-card {
   background: var(--glass-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
   border: 1px solid var(--glass-border);
-  padding: 32px;
+  padding: 28px;
 }
 
-/* 按钮公共类 */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 52px;
+  height: 48px;
   border-radius: var(--radius-btn);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
-  transition: all 0.3s ease;
-  padding: 0 24px;
+  transition: all 0.2s ease;
+  padding: 0 20px;
 }
 
 .btn-sm {
-  height: 44px;
+  height: 40px;
   font-size: 14px;
 }
 
@@ -69,14 +65,12 @@ ul, ol {
 }
 
 .btn-primary:hover {
-  filter: brightness(1.05);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(124, 58, 237, 0.4);
+  filter: brightness(1.04);
+  transform: translateY(-1px);
 }
 
 .btn-primary:active {
-  transform: translateY(1px);
-  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);
+  transform: translateY(0);
 }
 
 .btn-ghost {
@@ -86,7 +80,7 @@ ul, ol {
 }
 
 .btn-ghost:hover {
-  background: rgba(124, 58, 237, 0.08);
+  background: rgba(29, 78, 216, 0.08);
 }
 
 .btn-parent {
@@ -99,9 +93,8 @@ ul, ol {
   color: white;
 }
 
-/* 输入框通用样式 */
 .input-group {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .input-label {
@@ -118,14 +111,14 @@ ul, ol {
   background: white;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-input);
-  height: 52px;
-  transition: all 0.3s ease;
+  height: 48px;
+  transition: all 0.2s ease;
   overflow: hidden;
 }
 
 .input-wrapper:focus-within {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+  border-color: var(--color-primary-light);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
 }
 
 .input-field {
@@ -134,8 +127,8 @@ ul, ol {
   border: none;
   outline: none;
   background: transparent;
-  padding: 0 16px;
-  font-size: 16px;
+  padding: 0 14px;
+  font-size: 15px;
   color: var(--color-text-main);
 }
 
@@ -147,12 +140,11 @@ ul, ol {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
+  width: 44px;
   color: var(--color-text-light);
-  font-size: 18px;
+  font-size: 16px;
 }
 
-/* 工具类 */
 .text-primary { color: var(--color-primary); }
 .text-parent { color: var(--color-parent); }
 .text-teacher { color: var(--color-teacher); }

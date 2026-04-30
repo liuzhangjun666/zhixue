@@ -54,7 +54,15 @@ export const parentVerifyCode = async (payload: { phone: string; code: string })
   return unwrapData(res, { verified: false })
 }
 
-export const parentRegister = async (payload: { phone: string; password: string; nickname: string; code: string }) => {
+export const parentRegister = async (payload: {
+  phone: string
+  password: string
+  nickname: string
+  code: string
+  inviteCode?: string
+  agree: boolean
+  policyVersion: string
+}) => {
   const res = await request('/api/auth/parent/register', { method: 'POST', body: payload })
   return unwrapData(res, {} as AuthResponse)
 }
@@ -88,6 +96,8 @@ export const teacherRegister = async (payload: {
   inviteCode?: string
   certType?: 'teacher_license' | 'work_proof' | 'id_card'
   certUrl?: string
+  agree: boolean
+  policyVersion: string
 }) => {
   const res = await request('/api/teacher/auth/register', { method: 'POST', body: payload })
   return unwrapData(res, {} as AuthResponse)

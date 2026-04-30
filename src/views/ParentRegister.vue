@@ -7,6 +7,7 @@ import { parentRegister, parentSendCode, parentVerifyCode, setAuthSession } from
 const router = useRouter()
 const route = useRoute()
 const currentStep = ref(1)
+const POLICY_VERSION = '2026-04-30'
 
 // Form data
 const phone = ref('')
@@ -18,6 +19,7 @@ const agree = ref(false)
 const nickname = ref('')
 const gender = ref('')
 const grade = ref('')
+const inviteCode = ref('')
 const loading = ref(false)
 const sendingCode = ref(false)
 const verifyingStepOne = ref(false)
@@ -105,7 +107,10 @@ const finishRegister = async () => {
       phone: phone.value.trim(),
       password: password.value,
       nickname: nickname.value.trim(),
-      code: code.value.trim()
+      code: code.value.trim(),
+      inviteCode: inviteCode.value.trim() || undefined,
+      agree: agree.value,
+      policyVersion: POLICY_VERSION
     })
     if (!data?.token || !data?.user) throw new Error('注册返回数据不完整')
     setAuthSession(data.token, data.user)
@@ -205,8 +210,8 @@ onUnmounted(() => {
                 <input type="checkbox" v-model="agree" required>
                 <span class="checkbox-text">
                   我已阅读并同意
-                  <a href="#" class="link">《用户协议》</a>和
-                  <a href="#" class="link">《隐私政策》</a>
+                  <router-link to="/legal/terms" class="link">《用户协议》</router-link>和
+                  <router-link to="/legal/privacy" class="link">《隐私政策》</router-link>
                 </span>
               </label>
             </div>
@@ -239,6 +244,12 @@ onUnmounted(() => {
                 <option value="middle">初中</option>
                 <option value="high">高中</option>
               </select>
+            </div>
+
+            <div class="input-group">
+              <div class="input-wrapper">
+                <input type="text" v-model="inviteCode" class="input-field" placeholder="邀请码（选填）">
+              </div>
             </div>
             
             <button type="submit" class="btn btn-primary w-100 mt-4">下一步</button>

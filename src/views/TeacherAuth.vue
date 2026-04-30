@@ -9,10 +9,12 @@ const router = useRouter()
 const route = useRoute()
 const currentStep = ref(1)
 const isLoginMode = ref(false)
+const POLICY_VERSION = '2026-04-30'
 
 const phone = ref('')
 const code = ref('')
 const password = ref('')
+const agree = ref(false)
 
 const nickname = ref('')
 const gender = ref('')
@@ -120,6 +122,10 @@ const nextStep = async () => {
       errorText.value = '请填写手机号、验证码和密码'
       return
     }
+    if (!agree.value) {
+      errorText.value = '请先阅读并同意用户协议与隐私政策'
+      return
+    }
     if (password.value.length < 6) {
       errorText.value = '密码至少 6 位'
       return
@@ -191,7 +197,9 @@ const finishRegister = async () => {
       school: school.value.trim(),
       inviteCode: inviteCode.value.trim() || undefined,
       certType: certType.value,
-      certUrl: certUrl.value.trim() || undefined
+      certUrl: certUrl.value.trim() || undefined,
+      agree: agree.value,
+      policyVersion: POLICY_VERSION
     })
     if (!data?.token || !data?.user) {
       throw new Error('注册返回数据不完整')
@@ -307,7 +315,18 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <button type="submit" class="btn btn-teacher w-100 mt-4" :disabled="verifyingStepOne">下一步</button>
+              <div class="agreement mt-2">
+                <label class="checkbox-wrapper">
+                  <input type="checkbox" v-model="agree" required>
+                  <span class="checkbox-text">
+                    我已阅读并同意
+                    <router-link to="/legal/terms" class="link">《用户协议》</router-link>和
+                    <router-link to="/legal/privacy" class="link">《隐私政策》</router-link>
+                  </span>
+                </label>
+              </div>
+
+              <button type="submit" class="btn btn-teacher w-100 mt-4">下一步</button>
             </form>
           </div>
 
@@ -519,6 +538,34 @@ onUnmounted(() => {
   border-color: var(--color-teacher);
   background: rgba(16, 168, 129, 0.12);
   color: #047857;
+}
+
+.agreement {
+  display: flex;
+  align-items: center;
+}
+
+.checkbox-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.checkbox-wrapper input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-teacher);
+}
+
+.checkbox-text {
+  font-size: 13px;
+  color: var(--color-text-sub);
+}
+
+.link {
+  color: var(--color-teacher);
+  text-decoration: underline;
 }
 
 .select-field {
